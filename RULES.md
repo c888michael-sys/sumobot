@@ -20,7 +20,15 @@ Two robots compete head-to-head; **force your opponent out of the ring**. Fully 
 ## Arena
 - **Circular ring, 120 cm outer / 115 cm inner diameter.**
 - Black surface with a **2.5 cm white border line**.
-- 18 mm MDF, spray-painted. 100 cm clearance kept around the ring.
+- 18 mm MDF, spray-painted. 100 cm clearance kept around the ring (so bots don't pick up false sensor data).
+
+## Starting position & direction (§3.3, Figure 2)
+- **Four starting positions to choose from.** Each team picks one **before the match** and informs
+  the judge; you **cannot change** until the next round. Robots start on **opposing sides** (§1.4.9).
+- **"Forward" is whatever direction the main ultrasonic sensor / wedge ramp faces** (i.e. the forward
+  defined in your code). The Figure 2 arrow marks this heading.
+- *Strategic note:* choosing your start position/orientation relative to the opponent is a real lever
+  (e.g. start angled to go for a flank). **The simulator does not model this yet** — see PLAN.md.
 
 ## Robot specs
 | | Standard | Open |
@@ -44,10 +52,12 @@ liquid/powder/gas storage · throwing mechanisms · traction adhesives · magnet
 adhesion · sharp edges (radius must exceed 0.005″) · intentionally damaging the opponent.
 
 ## Winning a round
-- **Force any part of the opponent out of the ring**, or
+- **Force any part of the opponent out of the ring** — i.e. it touches any non-ring surface (§1.5.1.1), or
 - the opponent falls out on its own, or
 - **the opponent stops moving for 5+ seconds**, or
-- any of the above is true at the time limit.
+- any of the above is true at the moment the match ends.
+- A robot that **falls over but is still in the ring does NOT lose** — the match continues (§1.5.2).
+- *Sim note:* the simulator currently uses "centre crosses the edge" (a simplification of "any part out").
 
 ## Rematches / ties
 - Entangled or orbiting with no progress for 5 s → rematch.
