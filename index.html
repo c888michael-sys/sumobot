@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SUMOBOTS Simulator</title>
+<style>
+  :root{
+    --bg:#0f1216; --panel:#171c22; --panel2:#1f262e; --line:#2a333d;
+    --text:#e6edf3; --muted:#9fb0c0; --accent:#4cc2ff;
+    --a:#3b82f6; --b:#ef4444; --ok:#34d399; --warn:#fbbf24;
+    --mono:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,Roboto,Arial}
+  header{padding:10px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  header h1{font-size:16px;margin:0;letter-spacing:.5px}
+  header .tag{color:var(--muted);font-size:12px}
+  .wrap{display:flex;gap:14px;padding:14px;align-items:flex-start;flex-wrap:wrap}
+  .col{display:flex;flex-direction:column;gap:12px}
+  .left{flex:0 0 auto}
+  .right{flex:1 1 460px;min-width:380px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+  canvas{background:#0a0d11;border-radius:10px;display:block}
+  .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
+  button{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;
+    padding:7px 12px;cursor:pointer;font-size:13px;font-weight:600}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);color:#04121c;border-color:var(--accent)}
+  button.b{background:#3a1414;border-color:#5a2020}
+  .scorerow{display:flex;justify-content:space-between;align-items:center;font-weight:700;margin-top:8px}
+  .pill{padding:2px 8px;border-radius:20px;font-size:12px}
+  .pa{background:rgba(59,130,246,.18);color:#9cc2ff}
+  .pb{background:rgba(239,68,68,.18);color:#ffb0b0}
+  .editors{display:flex;flex-direction:column;gap:12px}
+  .ed h3{margin:0 0 6px;font-size:13px;display:flex;align-items:center;gap:8px}
+  .dot{width:10px;height:10px;border-radius:50%}
+  .da{background:var(--a)} .db{background:var(--b)}
+  textarea{width:100%;height:230px;background:#0a0d11;color:#d7e6f5;border:1px solid var(--line);
+    border-radius:8px;padding:10px;font-family:var(--mono);font-size:12.5px;resize:vertical;tab-size:2}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .row > div{flex:1 1 0}
+  label.fld{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted)}
+  label.fld input{background:#0a0d11;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:5px 6px;font-size:12px}
+  details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:4px}
+  .cfgcard{display:flex;gap:14px;flex-wrap:wrap}
+  .cfgcol{flex:1 1 240px}
+  .cfgcol h4{margin:4px 0 8px;font-size:12px}
+  #console{height:120px;overflow:auto;background:#0a0d11;border:1px solid var(--line);border-radius:8px;
+    padding:8px;font-family:var(--mono);font-size:11.5px;color:#b9c8d6;white-space:pre-wrap}
+  #console .ca{color:#9cc2ff} #console .cb{color:#ffb0b0} #console .sys{color:var(--muted)}
+  .legend{font-size:12px;color:var(--muted)}
+  .legend code{background:#0a0d11;padding:1px 5px;border-radius:4px;color:#cfe;border:1px solid var(--line)}
+  .banner{position:absolute;left:0;right:0;top:42%;text-align:center;font-size:30px;font-weight:800;
+    text-shadow:0 2px 18px #000;pointer-events:none}
+  .canvasWrap{position:relative;width:min-content}
+  .chk{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+  .small{font-size:11px;color:var(--muted)}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <h1>🤖 SUMOBOTS SIMULATOR</h1>
+  <span class="tag">autonomous robot sumo · push the opponent out · top-down physics</span>
+</header>
+
+<div class="wrap">
+  <!-- LEFT: arena + controls -->
+  <div class="col left">
+    <div class="card">
+      <div class="canvasWrap">
+        <canvas id="arena" width="560" height="560"></canvas>
+        <div class="banner" id="banner"></div>
+      </div>
+      <div class="controls">
+        <button id="run" class="primary">▶ Run match</button>
+        <button id="pause">⏸ Pause</button>
+        <button id="reset">↺ Reset</button>
+        <div class="chk"><input type="checkbox" id="showRays" checked><label for="showRays">sensors</label></div>
+        <div class="chk"><label for="speed">speed</label>
+          <input type="range" id="speed" min="0.25" max="4" step="0.25" value="1" style="width:90px">
+          <span id="speedv" class="small">1.0×</span></div>
+      </div>
+      <div class="scorerow">
+        <span><span class="pill pa" id="nameA">BOT A</span> <span id="scoreA">0</span></span>
+        <span class="small" id="status">Round 1 · 0.0s</span>
+        <span><span id="scoreB">0</span> <span class="pill pb" id="nameB">BOT B</span></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin:0 0 6px;font-size:13px">Console</h3>
+      <div id="console"></div>
+    </div>
+  </div>
+
+  <!-- RIGHT: code + config + help -->
+  <div class="col right">
+    <div class="card editors">
+      <div class="ed">
+        <h3><span class="dot da"></span> Bot A code</h3>
+        <textarea id="codeA" spellcheck="false"></textarea>
+      </div>
+      <div class="ed">
+        <h3><span class="dot db"></span> Bot B code</h3>
+        <textarea id="codeB" spellcheck="false"></textarea>
+      </div>
+      <div class="controls">
+        <button id="apply" class="primary">✓ Apply code &amp; restart</button>
+        <button id="copyB">A → B (copy)</button>
+        <button id="reseed">↺ Reset to default bot</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <details open>
+        <summary>Chassis config (tweak for low-wedge vs high-wedge, weight, grip…)</summary>
+        <div class="cfgcard" style="margin-top:10px">
+          <div class="cfgcol">
+            <h4><span class="dot da" style="display:inline-block"></span> Bot A</h4>
+            <div class="row">
+              <label class="fld">mass (kg)<input data-k="mass" data-bot="A" type="number" step="0.1" value="1.0"></label>
+              <label class="fld">grip µ<input data-k="mu" data-bot="A" type="number" step="0.1" value="1.0"></label>
+            </div>
+            <div class="row">
+              <label class="fld">length (cm)<input data-k="len" data-bot="A" type="number" step="1" value="18"></label>
+              <label class="fld">width (cm)<input data-k="wid" data-bot="A" type="number" step="1" value="18"></label>
+            </div>
+            <div class="row">
+              <label class="fld">wedge height 0–1<input data-k="wedge" data-bot="A" type="number" step="0.05" value="0.5"></label>
+              <label class="fld">max speed cm/s<input data-k="maxSpeed" data-bot="A" type="number" step="5" value="80"></label>
+            </div>
+          </div>
+          <div class="cfgcol">
+            <h4><span class="dot db" style="display:inline-block"></span> Bot B</h4>
+            <div class="row">
+              <label class="fld">mass (kg)<input data-k="mass" data-bot="B" type="number" step="0.1" value="1.0"></label>
+              <label class="fld">grip µ<input data-k="mu" data-bot="B" type="number" step="0.1" value="1.0"></label>
+            </div>
+            <div class="row">
+              <label class="fld">length (cm)<input data-k="len" data-bot="B" type="number" step="1" value="18"></label>
+              <label class="fld">width (cm)<input data-k="wid" data-bot="B" type="number" step="1" value="18"></label>
+            </div>
+            <div class="row">
+              <label class="fld">wedge height 0–1<input data-k="wedge" data-bot="B" type="number" step="0.05" value="0.5"></label>
+              <label class="fld">max speed cm/s<input data-k="maxSpeed" data-bot="B" type="number" step="5" value="80"></label>
+            </div>
+          </div>
+        </div>
+        <div class="small" style="margin-top:6px">Lower <b>wedge height</b> = gets under the opponent and strips their traction. Both bots start identical.</div>
+      </details>
+    </div>
+
+    <div class="card legend">
+      <details>
+        <summary>How to write a bot (API)</summary>
+        <p>Each control tick (~120&nbsp;Hz) your code runs with these variables in scope. Set motor power with <code>setMotors(left,right)</code>, each <code>-1…1</code>. The first 5&nbsp;s are a forced freeze (motors ignored) — sensors are live, so plan into <code>memory</code>.</p>
+        <ul>
+          <li><code>enemy</code> — <code>{detected, distance /*cm*/, bearing /*deg, +right/−left, 0=ahead*/}</code></li>
+          <li><code>sensors</code> — array of IR rays <code>[{angle, distance}]</code> (distance=Infinity if nothing)</li>
+          <li><code>edge</code> — line sensors at corners <code>{fl, fr, bl, br}</code> = true when over the white border</li>
+          <li><code>time</code> — seconds since the freeze ended (negative during countdown)</li>
+          <li><code>frozen</code> — true during the 5&nbsp;s countdown</li>
+          <li><code>memory</code> — a <code>{}</code> that persists across ticks (your robot's RAM)</li>
+          <li><code>log(...)</code> — print to the console panel</li>
+        </ul>
+        <p class="small">Win a round by pushing the opponent's center past the ring edge, or if it stalls (stops &gt;5&nbsp;s). Best of 3.
+        This mirrors real firmware: sense → decide → drive. JS here, but the logic ports straight to Arduino/C.</p>
+      </details>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ============================================================ *
+ *  SUMOBOTS SIMULATOR  — single-file, no dependencies
+ *  Top-down rigid-body physics with traction-limited pushing
+ *  and a wedge under-ride model.
+ * ============================================================ */
+
+/* ---------- vector helpers (canvas coords: x right, y down) ---------- */
+const V = {
+  add:(a,b)=>({x:a.x+b.x,y:a.y+b.y}),
+  sub:(a,b)=>({x:a.x-b.x,y:a.y-b.y}),
+  mul:(a,s)=>({x:a.x*s,y:a.y*s}),
+  dot:(a,b)=>a.x*b.x+a.y*b.y,
+  cross:(a,b)=>a.x*b.y-a.y*b.x,          // scalar z of a×b
+  crossSV:(s,v)=>({x:-s*v.y,y:s*v.x}),   // scalar × vector → vector
+  len:a=>Math.hypot(a.x,a.y),
+  perp:a=>({x:-a.y,y:a.x}),
+  rot:(a,ang)=>({x:a.x*Math.cos(ang)-a.y*Math.sin(ang),y:a.x*Math.sin(ang)+a.y*Math.cos(ang)}),
+  norm:a=>{const l=Math.hypot(a.x,a.y)||1;return {x:a.x/l,y:a.y/l};},
+};
+const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+const DEG=180/Math.PI, RAD=Math.PI/180;
+const G=981; // cm/s^2
+
+/* ---------- world constants (centimetres) ---------- */
+const RING_R=60;        // 120 cm outer diameter
+const BORDER=2.5;       // white border line
+const SENSOR_RANGE=80;  // IR/ultrasonic range
+const FOV=75*RAD;       // half field-of-view for enemy detection
+const MOUNT_ANGLES=[-40,-15,0,15,40]; // IR ray mount angles (deg, +right)
+const DT=1/120, SUBSTEPS=2;
+const STALL_SPEED=4, STALL_TIME=5, ROUND_TIME=120, FREEZE=5;
+
+/* ---------- Bot ---------- */
+class Bot{
+  constructor(cfg,color,name){this.color=color;this.name=name;this.applyCfg(cfg);}
+  applyCfg(cfg){
+    this.cfg={mass:+cfg.mass||1,len:+cfg.len||18,wid:+cfg.wid||18,
+      wedge:clamp(+cfg.wedge,0,1),mu:+cfg.mu||1,maxSpeed:+cfg.maxSpeed||80};
+  }
+  place(x,y,theta){
+    const c=this.cfg;
+    this.pos={x,y};this.theta=theta;this.vel={x:0,y:0};this.omega=0;
+    this.mass=c.mass;this.invMass=1/c.mass;
+    this.I=c.mass*(c.len*c.len+c.wid*c.wid)/12; this.invI=1/this.I;
+    this.tractionMod=1; this.memory={}; this.stall=0; this.brain=null; this.err=null;
+  }
+  fwd(){return {x:Math.cos(this.theta),y:Math.sin(this.theta)};}
+  right(){return V.perp(this.fwd());}
+  // 4 corners, world space (front is +len/2 along fwd)
+  corners(){
+    const f=this.fwd(),r=this.right(),hl=this.cfg.len/2,hw=this.cfg.wid/2;
+    const a=V.add(V.mul(f,hl),V.mul(r,hw));
+    const b=V.add(V.mul(f,hl),V.mul(r,-hw));
+    const c=V.add(V.mul(f,-hl),V.mul(r,-hw));
+    const d=V.add(V.mul(f,-hl),V.mul(r,hw));
+    return [V.add(this.pos,a),V.add(this.pos,b),V.add(this.pos,c),V.add(this.pos,d)];
+  }
+}
+
+/* ---------- tire / drive model (traction-limited) ---------- */
+function driveBot(bot,cmdL,cmdR,dt){
+  const f=bot.fwd(), r=bot.right(), hw=bot.cfg.wid/2;
+  const wheels=[
+    {pos:V.add(bot.pos,V.mul(r,-hw)),cmd:cmdL},
+    {pos:V.add(bot.pos,V.mul(r, hw)),cmd:cmdR},
+  ];
+  const Nwheel=bot.mass*G/2;                       // load per wheel
+  const maxImp=bot.cfg.mu*Nwheel*dt*bot.tractionMod; // friction impulse cap
+  const effM=bot.mass/2;
+  for(const w of wheels){
+    const rr=V.sub(w.pos,bot.pos);
+    const pv=V.add(bot.vel,V.crossSV(bot.omega,rr)); // contact-point velocity
+    const vLong=V.dot(pv,f), vLat=V.dot(pv,r);
+    const vCmd=w.cmd*bot.cfg.maxSpeed;
+    // impulse needed to hit commanded long speed and kill lateral slip
+    let J=V.add(V.mul(f,(vCmd-vLong)*effM),V.mul(r,(-vLat)*effM));
+    const Jl=V.len(J);
+    if(Jl>maxImp) J=V.mul(J,maxImp/Jl);             // clamp to available grip → slip
+    bot.vel=V.add(bot.vel,V.mul(J,bot.invMass));
+    bot.omega+=V.cross(rr,J)*bot.invI;
+  }
+}
+
+/* ---------- polygon collision (SAT) ---------- */
+function project(poly,ax){let mn=Infinity,mx=-Infinity;for(const p of poly){const d=V.dot(p,ax);if(d<mn)mn=d;if(d>mx)mx=d;}return[mn,mx];}
+function axesOf(poly){const ax=[];for(let i=0;i<poly.length;i++){const e=V.sub(poly[(i+1)%poly.length],poly[i]);ax.push(V.norm(V.perp(e)));}return ax;}
+function collide(A,B){
+  const pa=A.corners(),pb=B.corners();
+  let depth=Infinity,normal=null;
+  for(const ax of axesOf(pa).concat(axesOf(pb))){
+    const[a0,a1]=project(pa,ax),[b0,b1]=project(pb,ax);
+    const ov=Math.min(a1,b1)-Math.max(a0,b0);
+    if(ov<=0) return null;
+    if(ov<depth){depth=ov;normal=ax;}
+  }
+  let n=normal;
+  if(V.dot(V.sub(B.pos,A.pos),n)<0) n=V.mul(n,-1); // point A→B
+  // approx contact point: average of deepest vertices
+  let va=pa[0],best=-Infinity;for(const p of pa){const d=V.dot(p,n);if(d>best){best=d;va=p;}}
+  let vb=pb[0];best=Infinity;for(const p of pb){const d=V.dot(p,n);if(d<best){best=d;vb=p;}}
+  return {n,depth,cp:V.mul(V.add(va,vb),0.5)};
+}
+function applyImpulse(bot,imp,r){bot.vel=V.add(bot.vel,V.mul(imp,bot.invMass));bot.omega+=V.cross(r,imp)*bot.invI;}
+
+function resolve(A,B){
+  A.tractionMod=1;B.tractionMod=1;
+  const c=collide(A,B);
+  if(!c) return;
+  const {n,depth,cp}=c;
+  // positional correction
+  const tot=A.invMass+B.invMass, corr=Math.max(depth-0.05,0)*0.8;
+  A.pos=V.sub(A.pos,V.mul(n,corr*A.invMass/tot));
+  B.pos=V.add(B.pos,V.mul(n,corr*B.invMass/tot));
+  // impulse
+  const ra=V.sub(cp,A.pos),rb=V.sub(cp,B.pos);
+  const rv=V.sub(V.add(B.vel,V.crossSV(B.omega,rb)),V.add(A.vel,V.crossSV(A.omega,ra)));
+  const vn=V.dot(rv,n);
+  if(vn<0){
+    const rA=V.cross(ra,n),rB=V.cross(rb,n);
+    const inv=A.invMass+B.invMass+rA*rA*A.invI+rB*rB*B.invI;
+    const j=-(1.0)*vn/inv; const imp=V.mul(n,j);
+    applyImpulse(A,V.mul(imp,-1),ra);applyImpulse(B,imp,rb);
+    // friction between shells
+    const t=V.perp(n); let vt=V.dot(rv,t);
+    let jt=-vt/inv; jt=clamp(jt,-0.3*Math.abs(j),0.3*Math.abs(j));
+    const fi=V.mul(t,jt);applyImpulse(A,V.mul(fi,-1),ra);applyImpulse(B,fi,rb);
+  }
+  // ---- wedge under-ride: lower wedge strips the other's traction ----
+  const dirAB=V.norm(V.sub(B.pos,A.pos));
+  const faceA=V.dot(A.fwd(),dirAB), faceB=V.dot(B.fwd(),V.mul(dirAB,-1));
+  const K=1.4;
+  const strip=(lowH,hiH)=>clamp(1-K*(hiH-lowH),0.12,1);
+  if(faceA>0.3 && A.cfg.wedge<B.cfg.wedge) B.tractionMod=strip(A.cfg.wedge,B.cfg.wedge);
+  if(faceB>0.3 && B.cfg.wedge<A.cfg.wedge) A.tractionMod=strip(B.cfg.wedge,A.cfg.wedge);
+}
+
+/* ---------- sensors ---------- */
+function rayHitsPoly(o,d,poly,maxT){
+  let best=Infinity;
+  for(let i=0;i<poly.length;i++){
+    const p=poly[i],q=poly[(i+1)%poly.length];
+    const e=V.sub(q,p); const den=V.cross(d,e);
+    if(Math.abs(den)<1e-9) continue;
+    const diff=V.sub(p,o);
+    const t=V.cross(diff,e)/den;       // along ray
+    const u=V.cross(diff,d)/den;       // along edge
+    if(t>=0&&t<=maxT&&u>=0&&u<=1&&t<best) best=t;
+  }
+  return best;
+}
+function senseFor(self,other){
+  const f=self.fwd();
+  const rays=MOUNT_ANGLES.map(a=>{
+    const d=V.rot(f,a*RAD);
+    const t=rayHitsPoly(self.pos,d,other.corners(),SENSOR_RANGE);
+    return {angle:a,distance:isFinite(t)?+t.toFixed(1):Infinity};
+  });
+  // enemy fused: gate by range + FOV, give true bearing/distance
+  const to=V.sub(other.pos,self.pos), dist=V.len(to);
+  const bearing=Math.atan2(V.cross(f,V.norm(to)),V.dot(f,V.norm(to)));
+  const seen=rays.some(r=>isFinite(r.distance)) || (dist<SENSOR_RANGE && Math.abs(bearing)<FOV);
+  const enemy={detected:seen,distance:+dist.toFixed(1),bearing:+(bearing*DEG).toFixed(1)};
+  // edge sensors at the 4 corners
+  const [fr,fl,bl,br]=self.corners(); // order: FR, FL, BL, BR (front=+len)
+  const over=p=>V.len(p)>RING_R-BORDER;
+  const edge={fr:over(fr),fl:over(fl),bl:over(bl),br:over(br)};
+  return {enemy,sensors:rays,edge};
+}
+
+/* ---------- compile user code ---------- */
+function compile(code){
+  try{
+    const fn=new Function('enemy','sensors','edge','time','frozen','memory','setMotors','log',
+      '"use strict";\n'+code);
+    return {fn,err:null};
+  }catch(e){return {fn:null,err:e.message};}
+}
+
+/* =================== match controller =================== */
+const cv=document.getElementById('arena'), ctx=cv.getContext('2d');
+const W=cv.width,H=cv.height, MARGIN=18;
+const SCALE=(Math.min(W,H)-2*MARGIN)/(2*RING_R);
+const toPx=p=>({x:W/2+p.x*SCALE,y:H/2+p.y*SCALE});
+
+const cfgA={mass:1,len:18,wid:18,wedge:.5,mu:1,maxSpeed:80};
+const cfgB={mass:1,len:18,wid:18,wedge:.5,mu:1,maxSpeed:80};
+let A=new Bot(cfgA,'#3b82f6','BOT A'), B=new Bot(cfgB,'#ef4444','BOT B');
+let brainA={fn:null,err:null}, brainB={fn:null,err:null};
+
+let state='idle';        // idle | countdown | running | roundover | matchover
+let round=1, scoreA=0, scoreB=0, t=0, roundResultTimer=0, banner='';
+let logThrottle={};
+
+function setupRound(){
+  const swap=(round%2===0); // alternate sides each round
+  const x=20;
+  if(!swap){ A.place(-x,0,0); B.place(x,0,Math.PI); }
+  else     { A.place(x,0,Math.PI); B.place(-x,0,0); }
+  A.applyCfg(cfgA); B.applyCfg(cfgB);
+  A.place(A.pos.x,A.pos.y,A.theta); B.place(B.pos.x,B.pos.y,B.theta); // re-init dynamics after cfg
+  // re-place after applyCfg reset
+  if(!swap){ A.pos={x:-x,y:0};A.theta=0; B.pos={x:x,y:0};B.theta=Math.PI; }
+  else     { A.pos={x:x,y:0};A.theta=Math.PI; B.pos={x:-x,y:0};B.theta=0; }
+  t=-FREEZE; state='countdown'; banner=''; roundResultTimer=0;
+  A.stall=0;B.stall=0;
+}
+
+function startMatch(){
+  scoreA=0;scoreB=0;round=1;
+  brainA=compile(codeA.value); brainB=compile(codeB.value);
+  if(brainA.err) logLine('A','compile error: '+brainA.err,'cb');
+  if(brainB.err) logLine('B','compile error: '+brainB.err,'cb');
+  logLine('sys','Match start — best of 3','sys');
+  setupRound();
+}
+
+function runBrain(bot,brain,sense,frozen){
+  if(!brain.fn) return [0,0];
+  let l=0,r=0;
+  const setMotors=(a,b)=>{l=clamp(+a||0,-1,1);r=clamp(+b||0,-1,1);};
+  const tag=bot===A?'A':'B';
+  const log=(...m)=>{const key=tag+m.join(' ');if(logThrottle[key]&&performance.now()-logThrottle[key]<400)return;
+    logThrottle[key]=performance.now();logLine(tag,m.join(' '),tag==='A'?'ca':'cb');};
+  try{
+    brain.fn(sense.enemy,sense.sensors,sense.edge,+t.toFixed(2),frozen,bot.memory,setMotors,log);
+  }catch(e){ if(!bot.err){bot.err=e.message;logLine(tag,'runtime error: '+e.message,'cb');} }
+  if(frozen) return [0,0];
+  return [l,r];
+}
+
+function endRound(winner,reason){
+  if(winner==='A'){scoreA++;} else if(winner==='B'){scoreB++;}
+  banner = winner? (winner==='A'?A.name:B.name)+' wins round' : 'Draw';
+  logLine('sys',`Round ${round}: ${winner?(winner==='A'?'A':'B')+' wins':'draw'} (${reason})`,'sys');
+  state='roundover'; roundResultTimer=1.4;
+  if(scoreA===2||scoreB===2){ state='matchwait'; }
+}
+
+function checkRound(){
+  // out?
+  const outA=V.len(A.pos)>RING_R, outB=V.len(B.pos)>RING_R;
+  if(outA&&outB){endRound(null,'both out');return;}
+  if(outA){endRound('B','A pushed out');return;}
+  if(outB){endRound('A','B pushed out');return;}
+  // stall (only after freeze)
+  const sa=V.len(A.vel), sb=V.len(B.vel);
+  A.stall = sa<STALL_SPEED ? A.stall+DT : 0;
+  B.stall = sb<STALL_SPEED ? B.stall+DT : 0;
+  if(A.stall>STALL_TIME&&B.stall>STALL_TIME){endRound(null,'both stalled');return;}
+  if(A.stall>STALL_TIME){endRound('B','A stalled');return;}
+  if(B.stall>STALL_TIME){endRound('A','B stalled');return;}
+  if(t>ROUND_TIME){endRound(null,'time up');return;}
+}
+
+function step(){
+  if(state==='countdown'){ t+=DT; if(t>=0){state='running';banner='';} }
+  if(state==='countdown'||state==='running'){
+    const frozen = state==='countdown';
+    const sA=senseFor(A,B), sB=senseFor(B,A);
+    const [al,ar]=runBrain(A,brainA,sA,frozen);
+    const [bl,br]=runBrain(B,brainB,sB,frozen);
+    for(let s=0;s<SUBSTEPS;s++){
+      const dt=DT/SUBSTEPS;
+      resolve(A,B);
+      driveBot(A,al,ar,dt); driveBot(B,bl,br,dt);
+      // damping
+      A.vel=V.mul(A.vel,0.999);B.vel=V.mul(B.vel,0.999);A.omega*=0.985;B.omega*=0.985;
+      A.pos=V.add(A.pos,V.mul(A.vel,dt));A.theta+=A.omega*dt;
+      B.pos=V.add(B.pos,V.mul(B.vel,dt));B.theta+=B.omega*dt;
+    }
+    if(state==='running'){ t+=DT; checkRound(); }
+  } else if(state==='roundover'){
+    roundResultTimer-=DT;
+    if(roundResultTimer<=0){ round++; setupRound(); }
+  } else if(state==='matchwait'){
+    roundResultTimer-=DT;
+    if(roundResultTimer<=0){
+      const w=scoreA>scoreB?A.name:B.name;
+      banner=w+' WINS THE MATCH 🏆';
+      logLine('sys',`Match over — ${w} (${scoreA}–${scoreB})`,'sys');
+      state='matchover';
+    }
+  }
+}
+
+/* ---------- render ---------- */
+function drawBot(bot){
+  const c=bot.corners().map(toPx);
+  ctx.beginPath();ctx.moveTo(c[0].x,c[0].y);for(let i=1;i<4;i++)ctx.lineTo(c[i].x,c[i].y);ctx.closePath();
+  ctx.fillStyle=bot.color;ctx.globalAlpha=.9;ctx.fill();ctx.globalAlpha=1;
+  ctx.lineWidth=2;ctx.strokeStyle='#0a0d11';ctx.stroke();
+  // wedge nose triangle (front edge), brightness ~ how low/aggressive
+  const f=bot.fwd();
+  const nose=toPx(V.add(bot.pos,V.mul(f,bot.cfg.len/2)));
+  const fr=toPx(V.add(bot.pos,V.add(V.mul(f,bot.cfg.len/2),V.mul(bot.right(),bot.cfg.wid/2))));
+  const fl=toPx(V.add(bot.pos,V.add(V.mul(f,bot.cfg.len/2),V.mul(bot.right(),-bot.cfg.wid/2))));
+  const back=toPx(V.add(bot.pos,V.mul(f,bot.cfg.len/2-3)));
+  ctx.beginPath();ctx.moveTo(fl.x,fl.y);ctx.lineTo(fr.x,fr.y);ctx.lineTo(back.x,back.y);ctx.closePath();
+  ctx.fillStyle=`rgba(255,255,255,${0.15+(1-bot.cfg.wedge)*0.5})`;ctx.fill();
+  // heading dot
+  ctx.beginPath();ctx.arc(nose.x,nose.y,3,0,7);ctx.fillStyle='#fff';ctx.fill();
+}
+function drawRays(bot,other){
+  const f=bot.fwd();
+  ctx.lineWidth=1;
+  for(const a of MOUNT_ANGLES){
+    const d=V.rot(f,a*RAD);
+    const t=rayHitsPoly(bot.pos,d,other.corners(),SENSOR_RANGE);
+    const end=V.add(bot.pos,V.mul(d,isFinite(t)?t:SENSOR_RANGE));
+    const o=toPx(bot.pos),e=toPx(end);
+    ctx.strokeStyle=isFinite(t)?'rgba(52,211,153,.9)':'rgba(255,255,255,.10)';
+    ctx.beginPath();ctx.moveTo(o.x,o.y);ctx.lineTo(e.x,e.y);ctx.stroke();
+  }
+  // edge sensor dots
+  const cs=bot.corners();
+  for(const p of cs){const px=toPx(p);const hot=V.len(p)>RING_R-BORDER;
+    ctx.beginPath();ctx.arc(px.x,px.y,3,0,7);ctx.fillStyle=hot?'#fbbf24':'rgba(255,255,255,.35)';ctx.fill();}
+}
+function render(){
+  ctx.clearRect(0,0,W,H);
+  // ring
+  const ctr=toPx({x:0,y:0});
+  ctx.beginPath();ctx.arc(ctr.x,ctr.y,RING_R*SCALE,0,7);ctx.fillStyle='#15191e';ctx.fill();
+  ctx.lineWidth=BORDER*SCALE;ctx.strokeStyle='#e8eef5';ctx.stroke();
+  ctx.beginPath();ctx.arc(ctr.x,ctr.y,(RING_R-BORDER)*SCALE,0,7);ctx.fillStyle='#0c0f13';ctx.fill();
+  // center mark
+  ctx.strokeStyle='#222b34';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(ctr.x-8,ctr.y);ctx.lineTo(ctr.x+8,ctr.y);ctx.moveTo(ctr.x,ctr.y-8);ctx.lineTo(ctr.x,ctr.y+8);ctx.stroke();
+  if(document.getElementById('showRays').checked){drawRays(A,B);drawRays(B,A);}
+  drawBot(A);drawBot(B);
+  // countdown number
+  if(state==='countdown'){
+    ctx.fillStyle='rgba(255,255,255,.85)';ctx.font='bold 64px system-ui';ctx.textAlign='center';
+    ctx.fillText(Math.ceil(-t),ctr.x,ctr.y+22);
+    ctx.font='14px system-ui';ctx.fillStyle='var(--muted)';ctx.fillText('',ctr.x,ctr.y);
+  }
+  document.getElementById('banner').textContent=banner;
+  document.getElementById('scoreA').textContent=scoreA;
+  document.getElementById('scoreB').textContent=scoreB;
+  const phase=state==='countdown'?`starts in ${Math.ceil(-t)}s`:`${Math.max(0,t).toFixed(1)}s`;
+  document.getElementById('status').textContent=`Round ${round} · ${phase}`;
+}
+
+/* ---------- main loop ---------- */
+let running=false, acc=0, last=performance.now(), speed=1;
+function frame(now){
+  const real=Math.min((now-last)/1000,0.1); last=now;
+  if(running && state!=='idle' && state!=='matchover'){
+    acc+=real*speed;
+    while(acc>=DT){ step(); acc-=DT; }
+  }
+  render();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* ---------- console ---------- */
+const con=document.getElementById('console');
+function logLine(who,msg,cls){
+  const div=document.createElement('div');
+  div.className=cls||'sys';
+  const tag=who==='sys'?'·':who;
+  div.textContent=`[${tag}] ${msg}`;
+  con.appendChild(div); con.scrollTop=con.scrollHeight;
+  while(con.children.length>200) con.removeChild(con.firstChild);
+}
+
+/* ---------- UI wiring ---------- */
+const codeA=document.getElementById('codeA'), codeB=document.getElementById('codeB');
+document.getElementById('run').onclick=()=>{running=true;if(state==='idle'||state==='matchover')startMatch();};
+document.getElementById('pause').onclick=()=>{running=false;};
+document.getElementById('reset').onclick=()=>{running=false;state='idle';scoreA=scoreB=0;round=1;banner='';setupRound();state='idle';};
+document.getElementById('apply').onclick=()=>{save();running=true;startMatch();};
+document.getElementById('copyB').onclick=()=>{codeB.value=codeA.value;save();};
+document.getElementById('reseed').onclick=()=>{codeA.value=DEFAULT_BOT;codeB.value=DEFAULT_BOT;save();};
+document.getElementById('speed').oninput=e=>{speed=+e.target.value;document.getElementById('speedv').textContent=speed.toFixed(2)+'×';};
+codeA.oninput=save; codeB.oninput=save;
+document.querySelectorAll('input[data-k]').forEach(inp=>{
+  inp.oninput=()=>{const tgt=inp.dataset.bot==='A'?cfgA:cfgB;tgt[inp.dataset.k]=+inp.value;save();};
+});
+
+/* ---------- persistence ---------- */
+function save(){
+  try{localStorage.setItem('sumo',JSON.stringify({a:codeA.value,b:codeB.value,cfgA,cfgB}));}catch(e){}
+}
+function load(){
+  try{
+    const s=JSON.parse(localStorage.getItem('sumo')||'null');
+    if(s){codeA.value=s.a;codeB.value=s.b;Object.assign(cfgA,s.cfgA);Object.assign(cfgB,s.cfgB);
+      document.querySelectorAll('input[data-k]').forEach(inp=>{const t=inp.dataset.bot==='A'?cfgA:cfgB;inp.value=t[inp.dataset.k];});
+      return true;}
+  }catch(e){}
+  return false;
+}
+
+/* ---------- default bot: a competent wedge bot ---------- */
+const DEFAULT_BOT=
+`// ---- Default wedge bot: edge-safe, searches, charges ----
+// During the 5s freeze, remember where we first saw the enemy.
+if (frozen) {
+  if (enemy.detected) memory.lastBearing = enemy.bearing;
+  setMotors(0, 0);
+  return;
+}
+
+// 1) SELF-PRESERVATION: never drive off the ring.
+if (edge.fl && edge.fr) { setMotors(-1, -1); return; }   // nose over line -> reverse
+if (edge.fl)            { setMotors( 0.6, -1); return; }  // back-right away
+if (edge.fr)            { setMotors(-1,  0.6); return; }  // back-left away
+if (edge.bl || edge.br) { setMotors( 1,  1); return; }    // rear over line -> drive in
+
+// 2) ATTACK: chase the opponent and ram.
+if (enemy.detected) {
+  memory.lastBearing = enemy.bearing;
+  if (enemy.bearing >  12) setMotors(1, 0.15);   // enemy on the right -> turn right
+  else if (enemy.bearing < -12) setMotors(0.15, 1); // enemy on the left -> turn left
+  else setMotors(1, 1);                           // dead ahead -> full charge
+  return;
+}
+
+// 3) SEARCH: spin toward where we last saw them.
+const dir = (memory.lastBearing || 0) >= 0 ? 1 : -1;
+setMotors(0.55 * dir, -0.55 * dir);
+`;
+
+/* ---------- boot ---------- */
+if(!load()){ codeA.value=DEFAULT_BOT; codeB.value=DEFAULT_BOT; }
+document.getElementById('speedv').textContent='1.00×';
+setupRound(); state='idle';
+logLine('sys','Ready. Edit both bots, press “Run match”. Both start identical.','sys');
+</script>
+</body>
+</html>
