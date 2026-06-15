@@ -146,6 +146,9 @@
                   <option value="keys">⌨ keys — W/S · A/D spin · ←→ swing</option>
                 </select>
               </label>
+              <label class="fld">preset
+                <select data-preset="A"><option value="">preset...</option></select>
+              </label>
             </div>
             <div class="row">
               <label class="fld">mass (kg)<input data-k="mass" data-bot="A" type="number" step="0.1" value="1.0"></label>
@@ -156,7 +159,10 @@
               <label class="fld">width (cm)<input data-k="wid" data-bot="A" type="number" step="1" value="20"></label>
             </div>
             <div class="row">
-              <label class="fld">wedge height 0–1<input data-k="wedge" data-bot="A" type="number" step="0.05" value="0.5"></label>
+              <label class="fld">wedge L 0-1<input data-k="wedgeL" data-bot="A" type="number" step="0.05" value="0.5"></label>
+              <label class="fld">wedge R 0-1<input data-k="wedgeR" data-bot="A" type="number" step="0.05" value="0.5"></label>
+            </div>
+            <div class="row">
               <label class="fld">max speed cm/s<input data-k="maxSpeed" data-bot="A" type="number" step="5" value="80"></label>
             </div>
             <div class="row">
@@ -180,6 +186,9 @@
                   <option value="keys">⌨ keys — W/S · A/D spin · ←→ swing</option>
                 </select>
               </label>
+              <label class="fld">preset
+                <select data-preset="B"><option value="">preset...</option></select>
+              </label>
             </div>
             <div class="row">
               <label class="fld">mass (kg)<input data-k="mass" data-bot="B" type="number" step="0.1" value="1.0"></label>
@@ -190,7 +199,10 @@
               <label class="fld">width (cm)<input data-k="wid" data-bot="B" type="number" step="1" value="20"></label>
             </div>
             <div class="row">
-              <label class="fld">wedge height 0–1<input data-k="wedge" data-bot="B" type="number" step="0.05" value="0.5"></label>
+              <label class="fld">wedge L 0-1<input data-k="wedgeL" data-bot="B" type="number" step="0.05" value="0.5"></label>
+              <label class="fld">wedge R 0-1<input data-k="wedgeR" data-bot="B" type="number" step="0.05" value="0.5"></label>
+            </div>
+            <div class="row">
               <label class="fld">max speed cm/s<input data-k="maxSpeed" data-bot="B" type="number" step="5" value="80"></label>
             </div>
             <div class="row">
@@ -205,7 +217,7 @@
             </div>
           </div>
         </div>
-        <div class="small" style="margin-top:6px">Lower <b>wedge height</b> = gets under the opponent and strips their traction. <b>Start position</b> picks one of the four Figure-2 spots (forward = the heading shown by the arrow).</div>
+        <div class="small" style="margin-top:6px">Lower <b>wedge L/R height</b> = gets under the opponent at that side of the front edge and strips their traction. <b>Start position</b> picks one of the four Figure-2 spots (forward = the heading shown by the arrow).</div>
       </details>
     </div>
 
@@ -293,6 +305,25 @@ const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
 const DEG=180/Math.PI, RAD=Math.PI/180;
 const G=981; // cm/s^2
 
+function numberOr(v,fallback){
+  const n=+v;
+  return Number.isFinite(n) ? n : fallback;
+}
+function normalizeCfg(cfg){
+  const fallback=clamp(numberOr(cfg.wedge,0.5),0,1);
+  const wedgeL=clamp(numberOr(cfg.wedgeL,fallback),0,1);
+  const wedgeR=clamp(numberOr(cfg.wedgeR,fallback),0,1);
+  cfg.mass=numberOr(cfg.mass,1);
+  cfg.len=numberOr(cfg.len,20);
+  cfg.wid=numberOr(cfg.wid,20);
+  cfg.wedgeL=wedgeL;
+  cfg.wedgeR=wedgeR;
+  cfg.wedge=(wedgeL+wedgeR)/2;
+  cfg.mu=numberOr(cfg.mu,1);
+  cfg.maxSpeed=numberOr(cfg.maxSpeed,80);
+  return cfg;
+}
+
 /* ---------- world constants (centimetres) ---------- */
 let RING_R=60;          // 120 cm outer diameter — UI-configurable
 const BORDER=2.5;       // white border line
@@ -307,8 +338,9 @@ const STALL_SPEED=4, STALL_TIME=5, ROUND_TIME=120, FREEZE=5;
 class Bot{
   constructor(cfg,color,name){this.color=color;this.name=name;this.applyCfg(cfg);}
   applyCfg(cfg){
-    this.cfg={mass:+cfg.mass||1,len:+cfg.len||20,wid:+cfg.wid||20,
-      wedge:clamp(+cfg.wedge,0,1),mu:+cfg.mu||1,maxSpeed:+cfg.maxSpeed||80};
+    const c=normalizeCfg(Object.assign({},cfg));
+    this.cfg={mass:c.mass,len:c.len,wid:c.wid,
+      wedgeL:c.wedgeL,wedgeR:c.wedgeR,wedge:(c.wedgeL+c.wedgeR)/2,mu:c.mu,maxSpeed:c.maxSpeed};
   }
   place(x,y,theta){
     const c=this.cfg;
@@ -374,6 +406,10 @@ function collide(A,B){
   return {n,depth,cp:V.mul(V.add(va,vb),0.5)};
 }
 function applyImpulse(bot,imp,r){bot.vel=V.add(bot.vel,V.mul(imp,bot.invMass));bot.omega+=V.cross(r,imp)*bot.invI;}
+function wedgeAt(bot,cp){
+  const u=clamp(V.dot(V.sub(cp,bot.pos),bot.right())/(bot.cfg.wid/2),-1,1); // -1 left .. +1 right
+  return bot.cfg.wedgeL+(bot.cfg.wedgeR-bot.cfg.wedgeL)*(u+1)/2;
+}
 
 function resolve(A,B){
   A.tractionMod=1;B.tractionMod=1;
@@ -403,8 +439,9 @@ function resolve(A,B){
   const faceA=V.dot(A.fwd(),dirAB), faceB=V.dot(B.fwd(),V.mul(dirAB,-1));
   const K=1.4;
   const strip=(lowH,hiH)=>clamp(1-K*(hiH-lowH),0.12,1);
-  if(faceA>0.3 && A.cfg.wedge<B.cfg.wedge) B.tractionMod=Math.min(B.tractionMod,strip(A.cfg.wedge,B.cfg.wedge));
-  if(faceB>0.3 && B.cfg.wedge<A.cfg.wedge) A.tractionMod=Math.min(A.tractionMod,strip(B.cfg.wedge,A.cfg.wedge));
+  const wA=wedgeAt(A,c.cp), wB=wedgeAt(B,c.cp);
+  if(faceA>0.3 && wA<wB) B.tractionMod=Math.min(B.tractionMod,strip(wA,wB));
+  if(faceB>0.3 && wB<wA) A.tractionMod=Math.min(A.tractionMod,strip(wB,wA));
   // ---- front-to-side: nose on the opponent's flank lets you drive them ----
   // attacker faces the target (face*>~0.55) AND the target is broadside (its facing is
   // ~perpendicular to the line of contact, |face|<0.5) -> the T-boned bot loses grip.
@@ -476,8 +513,14 @@ const toPx=p=>({x:W/2+p.x*SCALE,y:H/2+p.y*SCALE});
 const fromPx=p=>({x:(p.x-W/2)/SCALE,y:(p.y-H/2)/SCALE});
 function updateScale(){ SCALE=(Math.min(W,H)-2*MARGIN)/(2*RING_R); }
 
-const cfgA={mass:1,len:20,wid:20,wedge:.5,mu:1,maxSpeed:80};
-const cfgB={mass:1,len:20,wid:20,wedge:.5,mu:1,maxSpeed:80};
+const PRESETS=[
+  {name:'Default (symmetric)',cfg:{mass:1,len:20,wid:20,wedgeL:0.5,wedgeR:0.5,mu:1,maxSpeed:80}},
+  {name:'Low wedge rammer',cfg:{mass:1,len:20,wid:20,wedgeL:0.1,wedgeR:0.1,mu:1.1,maxSpeed:80},bot:'rammer.js'},
+  {name:'Prototype side wedge',cfg:{mass:1,len:20,wid:20,wedgeL:0.05,wedgeR:0.30,mu:1.0,maxSpeed:80},
+    bot:'wedge-lever.js',start:4},
+];
+const cfgA=normalizeCfg({mass:1,len:20,wid:20,wedgeL:.5,wedgeR:.5,mu:1,maxSpeed:80});
+const cfgB=normalizeCfg({mass:1,len:20,wid:20,wedgeL:.5,wedgeR:.5,mu:1,maxSpeed:80});
 let A=new Bot(cfgA,'#3b82f6','BOT A'), B=new Bot(cfgB,'#ef4444','BOT B');
 let brainA={fn:null,err:null}, brainB={fn:null,err:null};
 
@@ -716,14 +759,17 @@ function drawBot(bot){
   ctx.beginPath();ctx.moveTo(c[0].x,c[0].y);for(let i=1;i<4;i++)ctx.lineTo(c[i].x,c[i].y);ctx.closePath();
   ctx.fillStyle=bot.color;ctx.globalAlpha=.9;ctx.fill();ctx.globalAlpha=1;
   ctx.lineWidth=2;ctx.strokeStyle='#0a0d11';ctx.stroke();
-  // wedge nose triangle (front edge), brightness ~ how low/aggressive
+  // wedge nose triangle (front edge), brightness reflects the lower L/R side
   const f=bot.fwd();
   const nose=toPx(V.add(bot.pos,V.mul(f,bot.cfg.len/2)));
   const fr=toPx(V.add(bot.pos,V.add(V.mul(f,bot.cfg.len/2),V.mul(bot.right(),bot.cfg.wid/2))));
   const fl=toPx(V.add(bot.pos,V.add(V.mul(f,bot.cfg.len/2),V.mul(bot.right(),-bot.cfg.wid/2))));
   const back=toPx(V.add(bot.pos,V.mul(f,bot.cfg.len/2-3)));
   ctx.beginPath();ctx.moveTo(fl.x,fl.y);ctx.lineTo(fr.x,fr.y);ctx.lineTo(back.x,back.y);ctx.closePath();
-  ctx.fillStyle=`rgba(255,255,255,${0.15+(1-bot.cfg.wedge)*0.5})`;ctx.fill();
+  const grad=ctx.createLinearGradient(fl.x,fl.y,fr.x,fr.y);
+  grad.addColorStop(0,`rgba(255,255,255,${0.15+(1-bot.cfg.wedgeL)*0.5})`);
+  grad.addColorStop(1,`rgba(255,255,255,${0.15+(1-bot.cfg.wedgeR)*0.5})`);
+  ctx.fillStyle=grad;ctx.fill();
   // heading dot
   ctx.beginPath();ctx.arc(nose.x,nose.y,3,0,7);ctx.fillStyle='#fff';ctx.fill();
 }
@@ -994,6 +1040,42 @@ async function loadBotInto(which,file){
 document.getElementById('loadA').onchange=e=>{loadBotInto('A',e.target.value);e.target.selectedIndex=0;};
 document.getElementById('loadB').onchange=e=>{loadBotInto('B',e.target.value);e.target.selectedIndex=0;};
 loadBotList();
+function refreshCfgInputs(which){
+  const t=normalizeCfg(which==='A'?cfgA:cfgB);
+  document.querySelectorAll(`input[data-k][data-bot="${which}"]`).forEach(inp=>{
+    if(inp.dataset.k in t) inp.value=t[inp.dataset.k];
+  });
+}
+function populatePresets(){
+  document.querySelectorAll('select[data-preset]').forEach(sel=>{
+    PRESETS.forEach((p,i)=>{
+      const o=document.createElement('option');
+      o.value=String(i); o.textContent=p.name;
+      sel.appendChild(o);
+    });
+  });
+}
+async function applyPreset(which,p){
+  if(!p) return;
+  Object.assign(which==='A'?cfgA:cfgB,p.cfg);
+  refreshCfgInputs(which);
+  if(p.start){
+    if(which==='A') startA=p.start; else startB=p.start;
+    const s=document.querySelector(`select[data-start="${which}"]`);
+    if(s) s.value=p.start;
+  }
+  if(p.bot) await loadBotInto(which,p.bot);
+  if(state==='idle'){setupRound();state='idle';}
+  save();
+}
+populatePresets();
+document.querySelectorAll('select[data-preset]').forEach(sel=>{
+  sel.onchange=async()=>{
+    const p=PRESETS[+sel.value];
+    await applyPreset(sel.dataset.preset,p);
+    sel.selectedIndex=0;
+  };
+});
 document.getElementById('speed').oninput=e=>{speed=+e.target.value;document.getElementById('speedv').textContent=speed.toFixed(2)+'×';};
 // ---- arena & sensor config ----
 const SENSOR_PRESETS={'5wide':[-40,-15,0,15,40],'4std':[-30,-10,10,30],'3ctr':[-20,0,20],'2wide':[-45,45],'1fwd':[0]};
@@ -1022,7 +1104,7 @@ document.getElementById('customAngles').oninput=e=>{
 };
 codeA.oninput=save; codeB.oninput=save;
 document.querySelectorAll('input[data-k]').forEach(inp=>{
-  inp.oninput=()=>{const tgt=inp.dataset.bot==='A'?cfgA:cfgB;tgt[inp.dataset.k]=+inp.value;save();};
+  inp.oninput=()=>{const tgt=inp.dataset.bot==='A'?cfgA:cfgB;tgt[inp.dataset.k]=+inp.value;normalizeCfg(tgt);save();};
 });
 document.querySelectorAll('select[data-start]').forEach(sel=>{
   sel.onchange=()=>{ if(sel.dataset.start==='A')startA=+sel.value; else startB=+sel.value;
@@ -1086,6 +1168,7 @@ window.addEventListener('pointerup',()=>{dragging=false;});
 
 /* ---------- persistence ---------- */
 function save(){
+  normalizeCfg(cfgA); normalizeCfg(cfgB);
   try{localStorage.setItem('sumo',JSON.stringify({
     a:codeA.value,b:codeB.value,cfgA,cfgB,startA,startB,ctrlA,ctrlB,
     ringR:RING_R,sensorRange:SENSOR_RANGE,sensorNoise:SENSOR_NOISE,
@@ -1097,6 +1180,7 @@ function load(){
   try{
     const s=JSON.parse(localStorage.getItem('sumo')||'null');
     if(s){codeA.value=s.a;codeB.value=s.b;Object.assign(cfgA,s.cfgA);Object.assign(cfgB,s.cfgB);
+      normalizeCfg(cfgA); normalizeCfg(cfgB);
       if(s.startA)startA=s.startA; if(s.startB)startB=s.startB;
       if(s.ctrlA)ctrlA=s.ctrlA; if(s.ctrlB)ctrlB=s.ctrlB;
       // arena & sensor settings
@@ -1108,7 +1192,7 @@ function load(){
         if(s.customAngles) document.getElementById('customAngles').value=s.customAngles;
         applySensorPreset(s.sensorPreset);
       }
-      document.querySelectorAll('input[data-k]').forEach(inp=>{const t=inp.dataset.bot==='A'?cfgA:cfgB;inp.value=t[inp.dataset.k];});
+      document.querySelectorAll('input[data-k]').forEach(inp=>{const t=normalizeCfg(inp.dataset.bot==='A'?cfgA:cfgB);inp.value=t[inp.dataset.k];});
       const selA=document.querySelector('select[data-start="A"]');if(selA)selA.value=startA;
       const selB=document.querySelector('select[data-start="B"]');if(selB)selB.value=startB;
       const ctA=document.querySelector('select[data-ctrl="A"]');if(ctA)ctA.value=ctrlA;
