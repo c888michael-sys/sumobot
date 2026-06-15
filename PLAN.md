@@ -243,6 +243,73 @@ never stalls**.
 
 ---
 
+## Feature — Keyboard control mode (W/A/D)
+
+Add a third per-bot control mode `'keys'` alongside the existing `'code'`/`'mouse'` (same `ctrlA`/
+`ctrlB` plumbing). Standard differential ("tank") drive: **`W`** forward, **`S`** reverse (optional),
+**`A`/`D`** rotate the bot on its own axis. The bot whose control = `keys` is driven by the keyboard.
+*(Line numbers below are approximate — anchor on the function/selector names, which are stable.)*
+
+1. **Dropdown option** — add to both `<select data-ctrl="A">` and `<select data-ctrl="B">`:
+   ```html
+   <option value="keys">⌨ keys — W/A·D</option>
+   ```
+
+2. **Key state + listeners** (place near the mouse pointer handlers):
+   ```js
+   const keys = {};
+   const keysActive = () => ctrlA === 'keys' || ctrlB === 'keys';
+   window.addEventListener('keydown', e => {
+     if (!keysActive()) return;
+     const tag = document.activeElement && document.activeElement.tagName;
+     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return; // don't hijack editor typing
+     const k = e.key.toLowerCase();
+     if (k === 'w' || k === 'a' || k === 's' || k === 'd') { keys[k] = true; e.preventDefault(); }
+   });
+   window.addEventListener('keyup', e => { const k = e.key.toLowerCase(); if (k in keys) keys[k] = false; });
+   ```
+
+3. **Drive function** (next to `manualDrive`):
+   ```js
+   function keyDrive(){
+     const fwd  = (keys.w ? 1 : 0) - (keys.s ? 1 : 0);   // drop the (keys.s) term for strictly W/A/D
+     const turn = (keys.d ? 1 : 0) - (keys.a ? 1 : 0);   // +1 = right
+     return [clamp(fwd + turn, -1, 1), clamp(fwd - turn, -1, 1)];
+   }
+   ```
+   `A`→`[-1,1]` (rotate left in place), `D`→`[1,-1]` (rotate right), `W`→`[1,1]` (forward), `W+D`→`[1,0]` (arc).
+
+4. **Wire into `step()`** — extend the two motor-assignment lines:
+   ```js
+   const [al,ar] = ctrlA==='mouse' ? (frozen?[0,0]:manualDrive(A,A.target))
+                 : ctrlA==='keys'  ? (frozen?[0,0]:keyDrive())
+                 : runBrain(A,brainA,sA,frozen);
+   const [bl,br] = ctrlB==='mouse' ? (frozen?[0,0]:manualDrive(B,B.target))
+                 : ctrlB==='keys'  ? (frozen?[0,0]:keyDrive())
+                 : runBrain(B,brainB,sB,frozen);
+   ```
+   (Keeps the freeze behaviour — a keys-bot holds still during the 5 s countdown.)
+
+5. **Clear held keys** on mode switch (in the `data-ctrl` `onchange`) and at round start (in
+   `setupRound`): `for (const k in keys) keys[k] = false;` — avoids a "stuck key" after switching.
+
+6. **Headless guard** (cosmetic) — widen the `runN` warning to
+   `if (ctrlA!=='code' || ctrlB!=='code') logLine('sys','(manual/keyboard bots play as code in headless runs)','sys');`.
+   `runMatches` already forces `'code'`, so no further change needed.
+
+- **Persistence:** none needed — `ctrlA`/`ctrlB` already save/load; `'keys'` flows through.
+- **Docs:** add a line to the help/API panel ("⌨ keys: W forward, A/D rotate, S reverse") and to
+  README.md's feature list.
+- **Optional — local 2-player:** map Bot B to the arrow keys. Add a second `keys2` object populated
+  from `arrowup/down/left/right`, make `keyDrive(which)` read `keys2` when `which==='B'`, and pass
+  `keyDrive('A')`/`keyDrive('B')` in `step()`. Otherwise put only **one** bot in keys mode at a time
+  (two keys-bots would share WASD and move identically).
+
+**Done when:** with Bot A control = `keys`, `W` drives forward, `A`/`D` spin it in place, nothing
+moves during the 5 s freeze, and typing in the code boxes still works (keys not hijacked).
+
+---
+
 ## Suggested file layout / deliverables
 
 ```
