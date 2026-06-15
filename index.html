@@ -129,6 +129,7 @@
                 <select data-ctrl="A">
                   <option value="code" selected>code (write a bot)</option>
                   <option value="mouse">🖱 mouse — click to drive</option>
+                  <option value="keys">⌨ keys — W/S · A/D spin · ←→ swing</option>
                 </select>
               </label>
             </div>
@@ -162,6 +163,7 @@
                 <select data-ctrl="B">
                   <option value="code" selected>code (write a bot)</option>
                   <option value="mouse">🖱 mouse — click to drive</option>
+                  <option value="keys">⌨ keys — W/S · A/D spin · ←→ swing</option>
                 </select>
               </label>
             </div>
@@ -497,6 +499,7 @@ function setupRound(){
   A.place(pa.x,pa.y,pa.th); A.startPos=startA;
   B.place(pb.x,pb.y,pb.th); B.startPos=startB;
   if(JITTER>0){ A.theta+=(Math.random()-0.5)*JITTER; B.theta+=(Math.random()-0.5)*JITTER; }
+  for(const k in keys) keys[k]=false;
   t=-FREEZE; state='countdown'; banner=''; roundResultTimer=0;
 }
 
@@ -539,6 +542,17 @@ function runMatches(n){
   scoreA=0;scoreB=0;round=1; setupRound(); state='idle';
   return {n, a:x, b:y, draws, winA:(100*x/n).toFixed(1)+'%', winB:(100*y/n).toFixed(1)+'%',
           draw:(100*draws/n).toFixed(1)+'%', ms};
+}
+
+// keyboard control: WASD spin, arrow swing
+function keyDrive(){
+  let l = (keys.w ? 1 : 0) - (keys.s ? 1 : 0);
+  let r = l;
+  const spin = (keys.d ? 1 : 0) - (keys.a ? 1 : 0); // A/D: opposite motors, 2× yaw rate
+  l += spin; r -= spin;
+  if (keys.arrowright) l += 1;  // swing right: fire left motor, right held
+  if (keys.arrowleft)  r += 1;  // swing left:  fire right motor, left held
+  return [clamp(l, -1, 1), clamp(r, -1, 1)];
 }
 
 // codeless control: steer the bot toward a clicked target (pure pursuit)
@@ -598,8 +612,12 @@ function step(){
   if(state==='countdown'||state==='running'){
     const frozen = state==='countdown';
     const sA=senseFor(A,B), sB=senseFor(B,A);
-    const [al,ar]= ctrlA==='mouse' ? (frozen?[0,0]:manualDrive(A,A.target)) : runBrain(A,brainA,sA,frozen);
-    const [bl,br]= ctrlB==='mouse' ? (frozen?[0,0]:manualDrive(B,B.target)) : runBrain(B,brainB,sB,frozen);
+    const [al,ar]= ctrlA==='mouse' ? (frozen?[0,0]:manualDrive(A,A.target))
+                 : ctrlA==='keys'  ? (frozen?[0,0]:keyDrive())
+                 : runBrain(A,brainA,sA,frozen);
+    const [bl,br]= ctrlB==='mouse' ? (frozen?[0,0]:manualDrive(B,B.target))
+                 : ctrlB==='keys'  ? (frozen?[0,0]:keyDrive())
+                 : runBrain(B,brainB,sB,frozen);
     for(let s=0;s<SUBSTEPS;s++){
       const dt=DT/SUBSTEPS;
       resolve(A,B);
@@ -743,7 +761,7 @@ const codeA=document.getElementById('codeA'), codeB=document.getElementById('cod
 document.getElementById('run').onclick=()=>{running=true;if(state==='idle'||state==='matchover')startMatch();};
 document.getElementById('pause').onclick=()=>{running=false;};
 document.getElementById('runN').onclick=()=>{
-  if(ctrlA==='mouse'||ctrlB==='mouse') logLine('sys','(mouse bots play as code in headless runs)','sys');
+  if(ctrlA!=='code'||ctrlB!=='code') logLine('sys','(manual/keyboard bots play as code in headless runs)','sys');
   const n=clamp(+document.getElementById('nmatches').value||100,2,500);
   logLine('sys',`Running ${n} headless matches…`,'sys');
   const r=runMatches(n);
@@ -810,8 +828,25 @@ document.querySelectorAll('select[data-start]').forEach(sel=>{
     save(); };
 });
 document.querySelectorAll('select[data-ctrl]').forEach(sel=>{
-  sel.onchange=()=>{ if(sel.dataset.ctrl==='A')ctrlA=sel.value; else ctrlB=sel.value; save(); };
+  sel.onchange=()=>{
+    if(sel.dataset.ctrl==='A')ctrlA=sel.value; else ctrlB=sel.value;
+    for(const k in keys) keys[k]=false;
+    save();
+  };
 });
+// ---- keyboard control: WASD + arrow keys ----
+const keys = {};
+const KEYNAMES = ['w','a','s','d','arrowleft','arrowright'];
+const keysActive = () => ctrlA === 'keys' || ctrlB === 'keys';
+window.addEventListener('keydown', e => {
+  if (!keysActive()) return;
+  const tag = document.activeElement && document.activeElement.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  const k = e.key.toLowerCase();
+  if (KEYNAMES.includes(k)) { keys[k] = true; e.preventDefault(); }
+});
+window.addEventListener('keyup', e => { const k = e.key.toLowerCase(); if (k in keys) keys[k] = false; });
+
 // ---- mouse ("codeless") control: click / drag inside the ring to set a target ----
 let dragging=false;
 function canvasTarget(ev){
