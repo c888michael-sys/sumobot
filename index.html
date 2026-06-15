@@ -821,6 +821,7 @@ function render(){
   drawBot(A);drawBot(B);
   // countdown number
   if(state==='countdown'){
+    const ctr=toPx({x:0,y:0});
     ctx.fillStyle='rgba(255,255,255,.85)';ctx.font='bold 64px system-ui';ctx.textAlign='center';
     ctx.fillText(Math.ceil(-t),ctr.x,ctr.y+22);
     ctx.font='14px system-ui';ctx.fillStyle='var(--muted)';ctx.fillText('',ctr.x,ctr.y);
