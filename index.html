@@ -137,8 +137,8 @@
               <label class="fld">grip µ<input data-k="mu" data-bot="A" type="number" step="0.1" value="1.0"></label>
             </div>
             <div class="row">
-              <label class="fld">length (cm)<input data-k="len" data-bot="A" type="number" step="1" value="18"></label>
-              <label class="fld">width (cm)<input data-k="wid" data-bot="A" type="number" step="1" value="18"></label>
+              <label class="fld">length (cm)<input data-k="len" data-bot="A" type="number" step="1" value="20"></label>
+              <label class="fld">width (cm)<input data-k="wid" data-bot="A" type="number" step="1" value="20"></label>
             </div>
             <div class="row">
               <label class="fld">wedge height 0–1<input data-k="wedge" data-bot="A" type="number" step="0.05" value="0.5"></label>
@@ -170,8 +170,8 @@
               <label class="fld">grip µ<input data-k="mu" data-bot="B" type="number" step="0.1" value="1.0"></label>
             </div>
             <div class="row">
-              <label class="fld">length (cm)<input data-k="len" data-bot="B" type="number" step="1" value="18"></label>
-              <label class="fld">width (cm)<input data-k="wid" data-bot="B" type="number" step="1" value="18"></label>
+              <label class="fld">length (cm)<input data-k="len" data-bot="B" type="number" step="1" value="20"></label>
+              <label class="fld">width (cm)<input data-k="wid" data-bot="B" type="number" step="1" value="20"></label>
             </div>
             <div class="row">
               <label class="fld">wedge height 0–1<input data-k="wedge" data-bot="B" type="number" step="0.05" value="0.5"></label>
@@ -291,7 +291,7 @@ const STALL_SPEED=4, STALL_TIME=5, ROUND_TIME=120, FREEZE=5;
 class Bot{
   constructor(cfg,color,name){this.color=color;this.name=name;this.applyCfg(cfg);}
   applyCfg(cfg){
-    this.cfg={mass:+cfg.mass||1,len:+cfg.len||18,wid:+cfg.wid||18,
+    this.cfg={mass:+cfg.mass||1,len:+cfg.len||20,wid:+cfg.wid||20,
       wedge:clamp(+cfg.wedge,0,1),mu:+cfg.mu||1,maxSpeed:+cfg.maxSpeed||80};
   }
   place(x,y,theta){
@@ -460,8 +460,8 @@ const toPx=p=>({x:W/2+p.x*SCALE,y:H/2+p.y*SCALE});
 const fromPx=p=>({x:(p.x-W/2)/SCALE,y:(p.y-H/2)/SCALE});
 function updateScale(){ SCALE=(Math.min(W,H)-2*MARGIN)/(2*RING_R); }
 
-const cfgA={mass:1,len:18,wid:18,wedge:.5,mu:1,maxSpeed:80};
-const cfgB={mass:1,len:18,wid:18,wedge:.5,mu:1,maxSpeed:80};
+const cfgA={mass:1,len:20,wid:20,wedge:.5,mu:1,maxSpeed:80};
+const cfgB={mass:1,len:20,wid:20,wedge:.5,mu:1,maxSpeed:80};
 let A=new Bot(cfgA,'#3b82f6','BOT A'), B=new Bot(cfgB,'#ef4444','BOT B');
 let brainA={fn:null,err:null}, brainB={fn:null,err:null};
 
