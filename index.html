@@ -516,7 +516,7 @@ function updateScale(){ SCALE=(Math.min(W,H)-2*MARGIN)/(2*RING_R); }
 const PRESETS=[
   {name:'Default (symmetric)',cfg:{mass:1,len:20,wid:20,wedgeL:0.5,wedgeR:0.5,mu:1,maxSpeed:80}},
   {name:'Low wedge rammer',cfg:{mass:1,len:20,wid:20,wedgeL:0.1,wedgeR:0.1,mu:1.1,maxSpeed:80},bot:'rammer.js'},
-  {name:'Prototype side wedge',cfg:{mass:1,len:20,wid:20,wedgeL:0.05,wedgeR:0.30,mu:1.0,maxSpeed:80},
+  {name:'Prototype side wedge',cfg:{mass:1,len:20,wid:20,wedgeL:0.05,wedgeR:0.70,mu:1.0,maxSpeed:80},
     bot:'wedge-lever.js',start:4},
 ];
 const cfgA=normalizeCfg({mass:1,len:20,wid:20,wedgeL:.5,wedgeR:.5,mu:1,maxSpeed:80});
