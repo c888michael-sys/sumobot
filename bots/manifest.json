@@ -1,0 +1,9 @@
+{
+  "bots": [
+    { "name": "rammer (baseline)", "file": "rammer.js" },
+    { "name": "flanker", "file": "flanker.js" },
+    { "name": "counter-puncher", "file": "edge-lurer.js" },
+    { "name": "juker", "file": "juker.js" },
+    { "name": "spiral-searcher", "file": "spiral-searcher.js" }
+  ]
+}

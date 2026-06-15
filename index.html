@@ -81,6 +81,9 @@
         <div class="chk"><label for="speed">speed</label>
           <input type="range" id="speed" min="0.25" max="4" step="0.25" value="1" style="width:90px">
           <span id="speedv" class="small">1.0×</span></div>
+        <button id="runN" title="Run many headless matches with randomised starts and report win %">⚔ Run</button>
+        <input type="number" id="nmatches" min="2" max="500" step="1" value="100" style="width:58px">
+        <span class="small">matches</span>
       </div>
       <div class="scorerow">
         <span><span class="pill pa" id="nameA">BOT A</span> <span id="scoreA">0</span></span>
@@ -110,6 +113,8 @@
         <button id="apply" class="primary">✓ Apply code &amp; restart</button>
         <button id="copyB">A → B (copy)</button>
         <button id="reseed">↺ Reset to default bot</button>
+        <select id="loadA" class="botpick"><option value="">load into A…</option></select>
+        <select id="loadB" class="botpick"><option value="">load into B…</option></select>
       </div>
     </div>
 
@@ -119,6 +124,14 @@
         <div class="cfgcard" style="margin-top:10px">
           <div class="cfgcol">
             <h4><span class="dot da" style="display:inline-block"></span> Bot A</h4>
+            <div class="row">
+              <label class="fld">control
+                <select data-ctrl="A">
+                  <option value="code" selected>code (write a bot)</option>
+                  <option value="mouse">🖱 mouse — click to drive</option>
+                </select>
+              </label>
+            </div>
             <div class="row">
               <label class="fld">mass (kg)<input data-k="mass" data-bot="A" type="number" step="0.1" value="1.0"></label>
               <label class="fld">grip µ<input data-k="mu" data-bot="A" type="number" step="0.1" value="1.0"></label>
@@ -144,6 +157,14 @@
           </div>
           <div class="cfgcol">
             <h4><span class="dot db" style="display:inline-block"></span> Bot B</h4>
+            <div class="row">
+              <label class="fld">control
+                <select data-ctrl="B">
+                  <option value="code" selected>code (write a bot)</option>
+                  <option value="mouse">🖱 mouse — click to drive</option>
+                </select>
+              </label>
+            </div>
             <div class="row">
               <label class="fld">mass (kg)<input data-k="mass" data-bot="B" type="number" step="0.1" value="1.0"></label>
               <label class="fld">grip µ<input data-k="mu" data-bot="B" type="number" step="0.1" value="1.0"></label>
@@ -239,7 +260,7 @@ class Bot{
     this.pos={x,y};this.theta=theta;this.vel={x:0,y:0};this.omega=0;
     this.mass=c.mass;this.invMass=1/c.mass;
     this.I=c.mass*(c.len*c.len+c.wid*c.wid)/12; this.invI=1/this.I;
-    this.tractionMod=1; this.memory={}; this.stall=0; this.brain=null; this.err=null;
+    this.tractionMod=1; this.memory={}; this.stall=0; this.brain=null; this.err=null; this.target=null;
   }
   fwd(){return {x:Math.cos(this.theta),y:Math.sin(this.theta)};}
   right(){return V.perp(this.fwd());}
@@ -327,8 +348,14 @@ function resolve(A,B){
   const faceA=V.dot(A.fwd(),dirAB), faceB=V.dot(B.fwd(),V.mul(dirAB,-1));
   const K=1.4;
   const strip=(lowH,hiH)=>clamp(1-K*(hiH-lowH),0.12,1);
-  if(faceA>0.3 && A.cfg.wedge<B.cfg.wedge) B.tractionMod=strip(A.cfg.wedge,B.cfg.wedge);
-  if(faceB>0.3 && B.cfg.wedge<A.cfg.wedge) A.tractionMod=strip(B.cfg.wedge,A.cfg.wedge);
+  if(faceA>0.3 && A.cfg.wedge<B.cfg.wedge) B.tractionMod=Math.min(B.tractionMod,strip(A.cfg.wedge,B.cfg.wedge));
+  if(faceB>0.3 && B.cfg.wedge<A.cfg.wedge) A.tractionMod=Math.min(A.tractionMod,strip(B.cfg.wedge,A.cfg.wedge));
+  // ---- front-to-side: nose on the opponent's flank lets you drive them ----
+  // attacker faces the target (face*>~0.55) AND the target is broadside (its facing is
+  // ~perpendicular to the line of contact, |face|<0.5) -> the T-boned bot loses grip.
+  const SIDE=0.25;                                   // grip the side-hit bot keeps (low = easy to push)
+  if(faceA>0.55 && Math.abs(faceB)<0.5) B.tractionMod=Math.min(B.tractionMod,SIDE);
+  if(faceB>0.55 && Math.abs(faceA)<0.5) A.tractionMod=Math.min(A.tractionMod,SIDE);
 }
 
 /* ---------- sensors ---------- */
@@ -378,6 +405,7 @@ const cv=document.getElementById('arena'), ctx=cv.getContext('2d');
 const W=cv.width,H=cv.height, MARGIN=18;
 const SCALE=(Math.min(W,H)-2*MARGIN)/(2*RING_R);
 const toPx=p=>({x:W/2+p.x*SCALE,y:H/2+p.y*SCALE});
+const fromPx=p=>({x:(p.x-W/2)/SCALE,y:(p.y-H/2)/SCALE});
 
 const cfgA={mass:1,len:18,wid:18,wedge:.5,mu:1,maxSpeed:80};
 const cfgB={mass:1,len:18,wid:18,wedge:.5,mu:1,maxSpeed:80};
@@ -399,22 +427,72 @@ const START_A={
 const mirrorPos=p=>({x:-p.x,y:p.y,th:Math.PI-p.th});
 const START_B={1:mirrorPos(START_A[1]),2:mirrorPos(START_A[2]),3:mirrorPos(START_A[3]),4:mirrorPos(START_A[4])};
 let startA=4, startB=4;
+let ctrlA='code', ctrlB='code';   // 'code' = run the bot script, 'mouse' = drive to clicks
+let JITTER=0;                      // start-heading jitter (rad) — set during tournaments only
+const MAX_ROUNDS=7;               // safety cap so endless draws can't loop forever
 
 function setupRound(){
   A.applyCfg(cfgA); B.applyCfg(cfgB);
   const pa=START_A[startA]||START_A[4], pb=START_B[startB]||START_B[4];
   A.place(pa.x,pa.y,pa.th); A.startPos=startA;
   B.place(pb.x,pb.y,pb.th); B.startPos=startB;
+  if(JITTER>0){ A.theta+=(Math.random()-0.5)*JITTER; B.theta+=(Math.random()-0.5)*JITTER; }
   t=-FREEZE; state='countdown'; banner=''; roundResultTimer=0;
 }
 
 function startMatch(){
   scoreA=0;scoreB=0;round=1;
-  brainA=compile(codeA.value); brainB=compile(codeB.value);
+  brainA = ctrlA==='mouse' ? {fn:null,err:null} : compile(codeA.value);
+  brainB = ctrlB==='mouse' ? {fn:null,err:null} : compile(codeB.value);
   if(brainA.err) logLine('A','compile error: '+brainA.err,'cb');
   if(brainB.err) logLine('B','compile error: '+brainB.err,'cb');
   logLine('sys','Match start — best of 3','sys');
   setupRound();
+}
+
+/* ---------- headless tournament (Phase 2) ----------
+   The engine is deterministic, so a tournament MUST inject variance or every match is identical.
+   We randomise each bot's start position (1-4) and jitter the start heading. Bots are forced to
+   'code' control (a mouse bot can't play headless). State is saved and restored afterwards. */
+function runMatches(n){
+  const saved={running, startA, startB, ctrlA, ctrlB, JITTER};
+  running=false; ctrlA='code'; ctrlB='code'; JITTER=0.5;
+  // Bot X = whatever's in slot A, bot Y = slot B. We ALTERNATE sides each match so any
+  // left/right or slot-order bias cancels out — wins are attributed to the bot, not the slot.
+  const cX=codeA.value, cY=codeB.value, cfX=Object.assign({},cfgA), cfY=Object.assign({},cfgB);
+  let x=0,y=0,draws=0; const t0=performance.now();
+  for(let m=0;m<n;m++){
+    const swap=(m%2===1);
+    codeA.value = swap?cY:cX; codeB.value = swap?cX:cY;
+    Object.assign(cfgA, swap?cfY:cfX); Object.assign(cfgB, swap?cfX:cfY);
+    startA=1+Math.floor(Math.random()*4); startB=1+Math.floor(Math.random()*4);
+    startMatch();
+    let i=0; while(state!=='matchover' && i<200*120){ step(); i++; }   // hard cap ~200 sim-seconds
+    const aWon=scoreA>scoreB, bWon=scoreB>scoreA;
+    if(aWon){ swap?y++:x++; } else if(bWon){ swap?x++:y++; } else draws++;
+  }
+  const ms=Math.round(performance.now()-t0);
+  // restore code/config and return to a clean idle frame
+  codeA.value=cX; codeB.value=cY; Object.assign(cfgA,cfX); Object.assign(cfgB,cfY);
+  running=saved.running; startA=saved.startA; startB=saved.startB;
+  ctrlA=saved.ctrlA; ctrlB=saved.ctrlB; JITTER=saved.JITTER;
+  scoreA=0;scoreB=0;round=1; setupRound(); state='idle';
+  return {n, a:x, b:y, draws, winA:(100*x/n).toFixed(1)+'%', winB:(100*y/n).toFixed(1)+'%',
+          draw:(100*draws/n).toFixed(1)+'%', ms};
+}
+
+// codeless control: steer the bot toward a clicked target (pure pursuit)
+function manualDrive(bot,target){
+  if(!target) return [0,0];
+  const to=V.sub(target,bot.pos), d=V.len(to);
+  if(d<3) return [0,0];                              // arrived -> hold
+  const f=bot.fwd(), n=V.norm(to);
+  const ang=Math.atan2(V.cross(f,n),V.dot(f,n));     // rad, + = target to the right
+  const fwd=Math.max(0,Math.cos(clamp(ang,-Math.PI/2,Math.PI/2))); // less throttle when off-axis
+  const steer=clamp(ang/(Math.PI/2),-1,1);
+  let l=fwd+steer, r=fwd-steer;
+  const m=Math.max(1,Math.abs(l),Math.abs(r));
+  return [l/m,r/m];
 }
 
 function runBrain(bot,brain,sense,frozen){
@@ -460,8 +538,8 @@ function step(){
   if(state==='countdown'||state==='running'){
     const frozen = state==='countdown';
     const sA=senseFor(A,B), sB=senseFor(B,A);
-    const [al,ar]=runBrain(A,brainA,sA,frozen);
-    const [bl,br]=runBrain(B,brainB,sB,frozen);
+    const [al,ar]= ctrlA==='mouse' ? (frozen?[0,0]:manualDrive(A,A.target)) : runBrain(A,brainA,sA,frozen);
+    const [bl,br]= ctrlB==='mouse' ? (frozen?[0,0]:manualDrive(B,B.target)) : runBrain(B,brainB,sB,frozen);
     for(let s=0;s<SUBSTEPS;s++){
       const dt=DT/SUBSTEPS;
       resolve(A,B);
@@ -474,7 +552,13 @@ function step(){
     if(state==='running'){ t+=DT; checkRound(); }
   } else if(state==='roundover'){
     roundResultTimer-=DT;
-    if(roundResultTimer<=0){ round++; setupRound(); }
+    if(roundResultTimer<=0){
+      if(round>=MAX_ROUNDS && scoreA<2 && scoreB<2){   // too many ties -> decide on score
+        banner = scoreA===scoreB ? 'Draw (rounds cap)' : (scoreA>scoreB?A.name:B.name)+' WINS (rounds cap)';
+        logLine('sys',`Match over — ${banner} (${scoreA}–${scoreB})`,'sys');
+        state='matchover';
+      } else { round++; setupRound(); }
+    }
   } else if(state==='matchwait'){
     roundResultTimer-=DT;
     if(roundResultTimer<=0){
@@ -535,6 +619,14 @@ function drawStartMarkers(){
     }
   }
 }
+function drawTarget(bot,ctrl){
+  if(ctrl!=='mouse'||!bot.target) return;
+  const p=toPx(bot.target);
+  ctx.strokeStyle=bot.color;ctx.lineWidth=2;ctx.globalAlpha=.9;
+  ctx.beginPath();ctx.arc(p.x,p.y,8,0,7);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(p.x-12,p.y);ctx.lineTo(p.x+12,p.y);ctx.moveTo(p.x,p.y-12);ctx.lineTo(p.x,p.y+12);ctx.stroke();
+  ctx.globalAlpha=1;
+}
 function render(){
   ctx.clearRect(0,0,W,H);
   // ring
@@ -547,6 +639,7 @@ function render(){
   ctx.beginPath();ctx.moveTo(ctr.x-8,ctr.y);ctx.lineTo(ctr.x+8,ctr.y);ctx.moveTo(ctr.x,ctr.y-8);ctx.lineTo(ctr.x,ctr.y+8);ctx.stroke();
   if(state==='countdown'||state==='idle') drawStartMarkers();
   if(document.getElementById('showRays').checked){drawRays(A,B);drawRays(B,A);}
+  drawTarget(A,ctrlA);drawTarget(B,ctrlB);
   drawBot(A);drawBot(B);
   // countdown number
   if(state==='countdown'){
@@ -589,10 +682,38 @@ function logLine(who,msg,cls){
 const codeA=document.getElementById('codeA'), codeB=document.getElementById('codeB');
 document.getElementById('run').onclick=()=>{running=true;if(state==='idle'||state==='matchover')startMatch();};
 document.getElementById('pause').onclick=()=>{running=false;};
+document.getElementById('runN').onclick=()=>{
+  if(ctrlA==='mouse'||ctrlB==='mouse') logLine('sys','(mouse bots play as code in headless runs)','sys');
+  const n=clamp(+document.getElementById('nmatches').value||100,2,500);
+  logLine('sys',`Running ${n} headless matches…`,'sys');
+  const r=runMatches(n);
+  logLine('sys',`Result of ${r.n}: ${A.name} ${r.winA} · ${B.name} ${r.winB} · draws ${r.draw}  (${r.ms} ms)`,'sys');
+  banner=`${A.name} ${r.winA} / ${B.name} ${r.winB}`;
+};
 document.getElementById('reset').onclick=()=>{running=false;state='idle';scoreA=scoreB=0;round=1;banner='';setupRound();state='idle';};
 document.getElementById('apply').onclick=()=>{save();running=true;startMatch();};
 document.getElementById('copyB').onclick=()=>{codeB.value=codeA.value;save();};
 document.getElementById('reseed').onclick=()=>{codeA.value=DEFAULT_BOT;codeB.value=DEFAULT_BOT;save();};
+// ---- bot library loader (Phase 3): fetch bots/<file> into a code box ----
+async function loadBotList(){
+  try{
+    const man=await fetch('bots/manifest.json').then(r=>r.json());
+    for(const id of ['loadA','loadB']){
+      const sel=document.getElementById(id);
+      man.bots.forEach(b=>{const o=document.createElement('option');o.value=b.file;o.textContent=b.name;sel.appendChild(o);});
+    }
+  }catch(e){ /* opened as file:// (no fetch) — loader stays empty; paste bots manually */ }
+}
+async function loadBotInto(which,file){
+  if(!file) return;
+  try{ const code=await fetch('bots/'+file).then(r=>r.text());
+    (which==='A'?codeA:codeB).value=code; save();
+    logLine('sys',`Loaded ${file} into Bot ${which}`,'sys');
+  }catch(e){ logLine('sys','load failed: '+e.message,'sys'); }
+}
+document.getElementById('loadA').onchange=e=>{loadBotInto('A',e.target.value);e.target.selectedIndex=0;};
+document.getElementById('loadB').onchange=e=>{loadBotInto('B',e.target.value);e.target.selectedIndex=0;};
+loadBotList();
 document.getElementById('speed').oninput=e=>{speed=+e.target.value;document.getElementById('speedv').textContent=speed.toFixed(2)+'×';};
 codeA.oninput=save; codeB.oninput=save;
 document.querySelectorAll('input[data-k]').forEach(inp=>{
@@ -603,19 +724,38 @@ document.querySelectorAll('select[data-start]').forEach(sel=>{
     if(state==='idle'){setupRound();state='idle';}  // live-preview the new spot while idle
     save(); };
 });
+document.querySelectorAll('select[data-ctrl]').forEach(sel=>{
+  sel.onchange=()=>{ if(sel.dataset.ctrl==='A')ctrlA=sel.value; else ctrlB=sel.value; save(); };
+});
+// ---- mouse ("codeless") control: click / drag inside the ring to set a target ----
+let dragging=false;
+function canvasTarget(ev){
+  const r=cv.getBoundingClientRect();
+  const w=fromPx({x:(ev.clientX-r.left)*(cv.width/r.width),y:(ev.clientY-r.top)*(cv.height/r.height)});
+  const d=V.len(w), lim=RING_R-3;                 // keep the aim point on the board
+  const t=d>lim?V.mul(V.norm(w),lim):w;
+  if(ctrlA==='mouse') A.target={x:t.x,y:t.y};
+  if(ctrlB==='mouse') B.target={x:t.x,y:t.y};
+}
+cv.addEventListener('pointerdown',e=>{ if(ctrlA==='mouse'||ctrlB==='mouse'){dragging=true;canvasTarget(e);} });
+cv.addEventListener('pointermove',e=>{ if(dragging)canvasTarget(e); });
+window.addEventListener('pointerup',()=>{dragging=false;});
 
 /* ---------- persistence ---------- */
 function save(){
-  try{localStorage.setItem('sumo',JSON.stringify({a:codeA.value,b:codeB.value,cfgA,cfgB,startA,startB}));}catch(e){}
+  try{localStorage.setItem('sumo',JSON.stringify({a:codeA.value,b:codeB.value,cfgA,cfgB,startA,startB,ctrlA,ctrlB}));}catch(e){}
 }
 function load(){
   try{
     const s=JSON.parse(localStorage.getItem('sumo')||'null');
     if(s){codeA.value=s.a;codeB.value=s.b;Object.assign(cfgA,s.cfgA);Object.assign(cfgB,s.cfgB);
       if(s.startA)startA=s.startA; if(s.startB)startB=s.startB;
+      if(s.ctrlA)ctrlA=s.ctrlA; if(s.ctrlB)ctrlB=s.ctrlB;
       document.querySelectorAll('input[data-k]').forEach(inp=>{const t=inp.dataset.bot==='A'?cfgA:cfgB;inp.value=t[inp.dataset.k];});
       const selA=document.querySelector('select[data-start="A"]');if(selA)selA.value=startA;
       const selB=document.querySelector('select[data-start="B"]');if(selB)selB.value=startB;
+      const ctA=document.querySelector('select[data-ctrl="A"]');if(ctA)ctA.value=ctrlA;
+      const ctB=document.querySelector('select[data-ctrl="B"]');if(ctB)ctB.value=ctrlB;
       return true;}
   }catch(e){}
   return false;

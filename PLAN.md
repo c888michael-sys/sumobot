@@ -117,7 +117,12 @@ faithful match rules, four Figure-2 start positions, paste-in JS bots, per-bot c
 
 ---
 
-## Phase 2 — Headless tournament harness (do this FIRST)
+## Phase 2 — Headless tournament harness ✅ DONE
+
+Implemented in `index.html`: the **⚔ Run** button + match count runs `runMatches(n)` headlessly and
+prints win % to the console. It injects variance (random start positions + heading `JITTER`), is
+**side-balanced** (alternates which slot each bot plays to cancel slot/left-right bias), and has the
+`MAX_ROUNDS` guard so endless draws can't loop. The spec below records how/why.
 
 Single matches are deterministic and noisy at symmetry, so scoring needs many *varied* matches.
 
@@ -154,7 +159,14 @@ you first snapshot the working file — that refactor is the highest-risk change
 **Done when:** `runMatches(100)` for two *different* bots returns **non-identical, stable** win
 percentages and finishes in a few seconds; identical bots return ≈ 50/50 (within noise) plus draws.
 
-## Phase 3 — Strategy bots
+## Phase 3 — Strategy bots ✅ DONE
+
+Five bots live in `bots/` (`rammer`, `spiral-searcher`, `flanker`, `juker`, `counter-puncher`), each a
+paste-ready body with the edge-guard preamble, loadable via the in-app dropdown. **Measured finding
+(see [bots/README.md](bots/README.md)): at equal chassis, none reliably beats a competent `rammer`** —
+the front-to-side push makes turning broadside fatal, so flanking/juking lose and head-on aggressors
+draw; the real lever is chassis (wedge/weight), not strategy. They're kept as a teaching set that
+documents *why* the clever moves underperform. Spec below.
 
 Write each as a paste-ready `bots/<name>.js` (body only). **Every bot must start with the same
 edge-guard preamble** (copy from the in-app default bot) so it never self-outs. Implement at least:

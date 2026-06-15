@@ -24,6 +24,13 @@ Edit the **Bot A** and **Bot B** code boxes, press **Run match**, watch the best
   grip, and getting-under decide the shove — not raw motor power, just like real sumo.
 - **Wedge under-ride model.** Each bot has a `wedge height` (0–1); the lower wedge strips the
   opponent's traction (their wheels "lift"). Lets you test **low-wedge vs high-wedge**.
+- **Front-to-side push.** Catch the opponent's flank with your nose (you facing them, they broadside)
+  and they lose grip — you drive them out. Turning broadside is punished, just like real sumo.
+- **Codeless / manual mode.** Set a bot's control to **🖱 mouse** and it drives to wherever you
+  click or drag in the arena (target crosshair shown) — play a coded bot by hand, no scripting.
+- **Headless tournaments + bot library.** **⚔ Run** plays N varied matches and reports win % (so you
+  can actually measure a strategy); five ready-made bots live in [`bots/`](bots/README.md), loadable
+  from a dropdown.
 - **Faithful to the rulebook:** 120 cm ring + 2.5 cm white border, 5 s start freeze, best-of-3,
   120 s rounds, win by pushing the opponent's centre past the edge **or** if it stalls > 5 s.
 - **Four selectable start positions per bot** (the Figure 2 spots — pick position + heading before
