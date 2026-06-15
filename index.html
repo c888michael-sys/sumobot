@@ -411,6 +411,14 @@ function wedgeAt(bot,cp){
   return bot.cfg.wedgeL+(bot.cfg.wedgeR-bot.cfg.wedgeL)*(u+1)/2;
 }
 
+let fxThrottle={};
+function fxLog(key,msg){                 // surface invisible physics effects in the console (live only)
+  if(!running) return;                  // skip headless tournaments (runMatches sets running=false)
+  const now=performance.now();
+  if(fxThrottle[key] && now-fxThrottle[key]<600) return;
+  fxThrottle[key]=now; logLine('sys',msg,'sys');
+}
+
 function resolve(A,B){
   A.tractionMod=1;B.tractionMod=1;
   const c=collide(A,B);
@@ -452,12 +460,12 @@ function resolve(A,B){
   // ---- wedge under-ride: traction strip + velocity damp on lifted bot ----
   const K=1.4;
   const strip=(lowH,hiH)=>clamp(1-K*(hiH-lowH),0.12,1);
-  if(liftB>0){ B.tractionMod=Math.min(B.tractionMod,strip(wA,wB)); B.vel=V.mul(B.vel,1-0.2*liftB); }
-  if(liftA>0){ A.tractionMod=Math.min(A.tractionMod,strip(wB,wA)); A.vel=V.mul(A.vel,1-0.2*liftA); }
+  if(liftB>0){ B.tractionMod=Math.min(B.tractionMod,strip(wA,wB)); B.vel=V.mul(B.vel,1-0.2*liftB); fxLog('uB','▲ A is under B → B weakened (grip '+B.tractionMod.toFixed(2)+', slowed)'); }
+  if(liftA>0){ A.tractionMod=Math.min(A.tractionMod,strip(wB,wA)); A.vel=V.mul(A.vel,1-0.2*liftA); fxLog('uA','▲ B is under A → A weakened (grip '+A.tractionMod.toFixed(2)+', slowed)'); }
   // ---- front-to-side: nose on flank → T-boned bot loses grip ----
   const SIDE=SIDEPUSH;
-  if(faceA>0.55 && Math.abs(faceB)<0.5) B.tractionMod=Math.min(B.tractionMod,SIDE);
-  if(faceB>0.55 && Math.abs(faceA)<0.5) A.tractionMod=Math.min(A.tractionMod,SIDE);
+  if(faceA>0.55 && Math.abs(faceB)<0.5){ B.tractionMod=Math.min(B.tractionMod,SIDE); fxLog('sB','◄ B caught on the flank by A → grip '+B.tractionMod.toFixed(2)); }
+  if(faceB>0.55 && Math.abs(faceA)<0.5){ A.tractionMod=Math.min(A.tractionMod,SIDE); fxLog('sA','► A caught on the flank by B → grip '+A.tractionMod.toFixed(2)); }
 }
 
 /* ---------- sensors ---------- */

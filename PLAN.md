@@ -547,6 +547,49 @@ wedge-height gap. All changes are in `resolve()`. *(Line numbers approximate.)*
 out with a clear margin (and the upper bot is slowed while ridden), the effect scales with the wedge-
 height gap, identical wedges still draw ~50/50, and no two bots get stuck overlapping.
 
+> **Status:** the ride-up consequence (overlap bias, inelastic impulse, traction strip + velocity
+> damp) is **implemented** in `resolve()`. The `fxLog()` effect logger is also implemented — it prints
+> "▲ A is under B → B weakened…" / flank-hit lines to the console during live matches (throttled,
+> off during headless runs). The turning extension below is the remaining piece.
+
+## Feature — Wedge turning: lever the opponent (off-centre impulse)
+
+Builds on the ride-up consequence. Right now getting under only **pushes and slows** the opponent — it
+doesn't **turn** them. Model the wedge as a **2-component effect**: a forward push that, applied at the
+**contact point** (off the lifted bot's centre — especially with an asymmetric one-side wedge),
+produces a **torque that rotates the opponent**. That enables the "lever them around to expose a flank"
+maneuver: get under their left → spin them → their side swings toward you → push out. All in `resolve()`,
+after `lift`/`cp` are known. *(Line numbers approximate.)*
+
+```js
+const TURN = 0.6;                                   // lever strength (tune)
+if (liftB > 0) {                                    // A is under B → lever B
+  const drive = Math.max(0, V.dot(A.vel, A.fwd())); // how hard A is driving forward
+  const J = V.mul(A.fwd(), TURN * liftB * drive * B.mass);
+  applyImpulse(B, J, V.sub(cp, B.pos));             // off-centre contact → cross(r,J) torque turns B
+  fxLog('turnB', '↻ A levers B around (turning)');
+}
+if (liftA > 0) {
+  const drive = Math.max(0, V.dot(B.vel, B.fwd()));
+  const J = V.mul(B.fwd(), TURN * liftA * drive * A.mass);
+  applyImpulse(A, J, V.sub(cp, A.pos));
+  fxLog('turnA', '↻ B levers A around (turning)');
+}
+```
+
+- The torque is automatic — `applyImpulse` already adds `V.cross(r, J) * invI` to omega. With a
+  low-**left** asymmetric wedge the contact sits left of the opponent's centreline, so the push spins
+  them, swinging a flank toward you (which then feeds the existing `SIDEPUSH`).
+- **Tune `TURN`** so a lifted opponent visibly rotates but isn't launched/spun wildly; verify in the
+  ⚔ harness that a one-side-low wedge + the `wedge-lever` bot now turns-then-pushes opponents out more
+  often than before. Cap it (and `liftA/liftB`) if motion gets chaotic.
+- It's the off-centre application that matters — a centre-line hit barely turns, an edge hit turns hard,
+  which is exactly the "asymmetric wedge turns the opponent" behaviour you want.
+
+**Done when:** a bot that gets under one side of the opponent visibly **rotates** them (you can lever a
+high-wedge bot sideways), the `↻ levers` line shows in the log, and combined with the side-push it can
+turn-then-shove them out; identical/symmetric engagements don't spin unnaturally.
+
 ## Feature — Chassis presets (incl. "Prototype side wedge")
 
 One-click named chassis setups (config + optional bot code + start position), so you can load a whole
