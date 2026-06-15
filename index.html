@@ -416,36 +416,46 @@ function resolve(A,B){
   const c=collide(A,B);
   if(!c) return;
   const {n,depth,cp}=c;
-  // positional correction
+
+  // ---- who's under whom (computed first so it biases the correction) ----
+  const dirAB=V.norm(V.sub(B.pos,A.pos));
+  const faceA=V.dot(A.fwd(),dirAB), faceB=V.dot(B.fwd(),V.mul(dirAB,-1));
+  const wA=wedgeAt(A,cp), wB=wedgeAt(B,cp);
+  const RIDE=2.0;       // height-gap → ride-up strength (tune)
+  let liftA=0, liftB=0;
+  if(faceA>0.3 && wA<wB) liftB=clamp((wB-wA)*RIDE,0,1); // A got under → B lifted
+  if(faceB>0.3 && wB<wA) liftA=clamp((wA-wB)*RIDE,0,1);
+  const lift=Math.max(liftA,liftB);
+
+  // ---- positional correction (lower bot advances; upper bot pushed further) ----
   const tot=A.invMass+B.invMass, corr=Math.max(depth-0.05,0)*0.8;
-  A.pos=V.sub(A.pos,V.mul(n,corr*A.invMass/tot));
-  B.pos=V.add(B.pos,V.mul(n,corr*B.invMass/tot));
-  // impulse
+  let shareA=A.invMass/tot, shareB=B.invMass/tot;
+  if(liftB>0){ shareB+=shareA*liftB; shareA*=(1-liftB); } // A barely pushed back → overlaps B
+  if(liftA>0){ shareA+=shareB*liftA; shareB*=(1-liftA); }
+  A.pos=V.sub(A.pos,V.mul(n,corr*shareA));
+  B.pos=V.add(B.pos,V.mul(n,corr*shareB));
+
+  // ---- impulse (less bouncy while under-riding) ----
   const ra=V.sub(cp,A.pos),rb=V.sub(cp,B.pos);
   const rv=V.sub(V.add(B.vel,V.crossSV(B.omega,rb)),V.add(A.vel,V.crossSV(A.omega,ra)));
   const vn=V.dot(rv,n);
   if(vn<0){
     const rA=V.cross(ra,n),rB=V.cross(rb,n);
     const inv=A.invMass+B.invMass+rA*rA*A.invI+rB*rB*B.invI;
-    const j=-(1.0)*vn/inv; const imp=V.mul(n,j);
+    const j=-(1.0-0.9*lift)*vn/inv; const imp=V.mul(n,j);
     applyImpulse(A,V.mul(imp,-1),ra);applyImpulse(B,imp,rb);
     // friction between shells
     const t=V.perp(n); let vt=V.dot(rv,t);
     let jt=-vt/inv; jt=clamp(jt,-0.3*Math.abs(j),0.3*Math.abs(j));
     const fi=V.mul(t,jt);applyImpulse(A,V.mul(fi,-1),ra);applyImpulse(B,fi,rb);
   }
-  // ---- wedge under-ride: lower wedge strips the other's traction ----
-  const dirAB=V.norm(V.sub(B.pos,A.pos));
-  const faceA=V.dot(A.fwd(),dirAB), faceB=V.dot(B.fwd(),V.mul(dirAB,-1));
+  // ---- wedge under-ride: traction strip + velocity damp on lifted bot ----
   const K=1.4;
   const strip=(lowH,hiH)=>clamp(1-K*(hiH-lowH),0.12,1);
-  const wA=wedgeAt(A,c.cp), wB=wedgeAt(B,c.cp);
-  if(faceA>0.3 && wA<wB) B.tractionMod=Math.min(B.tractionMod,strip(wA,wB));
-  if(faceB>0.3 && wB<wA) A.tractionMod=Math.min(A.tractionMod,strip(wB,wA));
-  // ---- front-to-side: nose on the opponent's flank lets you drive them ----
-  // attacker faces the target (face*>~0.55) AND the target is broadside (its facing is
-  // ~perpendicular to the line of contact, |face|<0.5) -> the T-boned bot loses grip.
-  const SIDE=SIDEPUSH;                               // grip the side-hit bot keeps (low = easy to push)
+  if(liftB>0){ B.tractionMod=Math.min(B.tractionMod,strip(wA,wB)); B.vel=V.mul(B.vel,1-0.2*liftB); }
+  if(liftA>0){ A.tractionMod=Math.min(A.tractionMod,strip(wB,wA)); A.vel=V.mul(A.vel,1-0.2*liftA); }
+  // ---- front-to-side: nose on flank → T-boned bot loses grip ----
+  const SIDE=SIDEPUSH;
   if(faceA>0.55 && Math.abs(faceB)<0.5) B.tractionMod=Math.min(B.tractionMod,SIDE);
   if(faceB>0.55 && Math.abs(faceA)<0.5) A.tractionMod=Math.min(A.tractionMod,SIDE);
 }
