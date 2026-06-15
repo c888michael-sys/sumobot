@@ -243,28 +243,39 @@ never stalls**.
 
 ---
 
-## Feature — Keyboard control mode (W/A/D)
+## Feature — Keyboard control mode (W/S, A/D spin, ←/→ swing)
 
 Add a third per-bot control mode `'keys'` alongside the existing `'code'`/`'mouse'` (same `ctrlA`/
-`ctrlB` plumbing). Standard differential ("tank") drive: **`W`** forward, **`S`** reverse (optional),
-**`A`/`D`** rotate the bot on its own axis. The bot whose control = `keys` is driven by the keyboard.
-*(Line numbers below are approximate — anchor on the function/selector names, which are stable.)*
+`ctrlB` plumbing). The bot whose control = `keys` is driven by the keyboard. Differential drive with
+**two kinds of turn** (because the wheels sit at the sides, not the centre):
+
+- **`W` / `S`** — forward / reverse (both motors together).
+- **`A` / `D` — spin (point) turn:** both motors fire opposite ways → rotates about the bot's
+  **centre**, no translation. The *fast* turn.
+- **`←` / `→` — swing turn:** **one** motor fires, the other is **held still** → rotates about the
+  **planted (stationary) wheel** and creeps forward at half speed. The *gentle, wider* turn.
+
+**Verified physics:** the spin turn's yaw rate is exactly **2× the swing turn's** (yaw rate
+`ω = (vR − vL)/w`, track width `w`; spin differential `= 1−(−1) = 2`, swing `= 1−0 = 1`). Measured in
+the sim at 2.00× across 40/80/160 cm/s. So `←`/`→` give finer aiming; `A`/`D` snap around twice as
+quick. *(Line numbers below are approximate — anchor on the function/selector names.)*
 
 1. **Dropdown option** — add to both `<select data-ctrl="A">` and `<select data-ctrl="B">`:
    ```html
-   <option value="keys">⌨ keys — W/A·D</option>
+   <option value="keys">⌨ keys — W/S · A·D spin · ←→ swing</option>
    ```
 
 2. **Key state + listeners** (place near the mouse pointer handlers):
    ```js
    const keys = {};
+   const KEYNAMES = ['w','a','s','d','arrowleft','arrowright'];
    const keysActive = () => ctrlA === 'keys' || ctrlB === 'keys';
    window.addEventListener('keydown', e => {
      if (!keysActive()) return;
      const tag = document.activeElement && document.activeElement.tagName;
      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return; // don't hijack editor typing
      const k = e.key.toLowerCase();
-     if (k === 'w' || k === 'a' || k === 's' || k === 'd') { keys[k] = true; e.preventDefault(); }
+     if (KEYNAMES.includes(k)) { keys[k] = true; e.preventDefault(); }      // preventDefault also stops arrow-key scroll
    });
    window.addEventListener('keyup', e => { const k = e.key.toLowerCase(); if (k in keys) keys[k] = false; });
    ```
@@ -272,12 +283,18 @@ Add a third per-bot control mode `'keys'` alongside the existing `'code'`/`'mous
 3. **Drive function** (next to `manualDrive`):
    ```js
    function keyDrive(){
-     const fwd  = (keys.w ? 1 : 0) - (keys.s ? 1 : 0);   // drop the (keys.s) term for strictly W/A/D
-     const turn = (keys.d ? 1 : 0) - (keys.a ? 1 : 0);   // +1 = right
-     return [clamp(fwd + turn, -1, 1), clamp(fwd - turn, -1, 1)];
+     let l = (keys.w ? 1 : 0) - (keys.s ? 1 : 0);      // W/S: both motors (forward / reverse)
+     let r = l;
+     const spin = (keys.d ? 1 : 0) - (keys.a ? 1 : 0); // A/D: spin in place, opposite motors, +1 = right
+     l += spin; r -= spin;
+     if (keys.arrowright) l += 1;                      // swing right: fire LEFT motor, right held still
+     if (keys.arrowleft)  r += 1;                      // swing left:  fire RIGHT motor, left held still
+     return [clamp(l, -1, 1), clamp(r, -1, 1)];
    }
    ```
-   `A`→`[-1,1]` (rotate left in place), `D`→`[1,-1]` (rotate right), `W`→`[1,1]` (forward), `W+D`→`[1,0]` (arc).
+   Pure presses: `D`→`[1,-1]` spin right, `A`→`[-1,1]` spin left, `→`→`[1,0]` swing right (pivots on the
+   right wheel), `←`→`[0,1]` swing left, `W`→`[1,1]`. Arrows already creep forward, so use them on their
+   own — combining with `W` cancels the "held still" wheel.
 
 4. **Wire into `step()`** — extend the two motor-assignment lines:
    ```js
@@ -298,15 +315,16 @@ Add a third per-bot control mode `'keys'` alongside the existing `'code'`/`'mous
    `runMatches` already forces `'code'`, so no further change needed.
 
 - **Persistence:** none needed — `ctrlA`/`ctrlB` already save/load; `'keys'` flows through.
-- **Docs:** add a line to the help/API panel ("⌨ keys: W forward, A/D rotate, S reverse") and to
-  README.md's feature list.
-- **Optional — local 2-player:** map Bot B to the arrow keys. Add a second `keys2` object populated
-  from `arrowup/down/left/right`, make `keyDrive(which)` read `keys2` when `which==='B'`, and pass
-  `keyDrive('A')`/`keyDrive('B')` in `step()`. Otherwise put only **one** bot in keys mode at a time
-  (two keys-bots would share WASD and move identically).
+- **Docs:** add a line to the help/API panel ("⌨ keys: W/S drive · A/D spin in place (fast) · ←/→
+  one-wheel swing (half as fast)") and to README.md's feature list.
+- **One keys-bot at a time.** Both A and B in `keys` mode would share the same keys and move
+  identically. Arrows are now the swing turn, so for local 2-player you'd give Bot B a *different*
+  cluster (e.g. `I`/`K` drive, `J`/`L` spin) via a second key set — not in scope here.
 
-**Done when:** with Bot A control = `keys`, `W` drives forward, `A`/`D` spin it in place, nothing
-moves during the 5 s freeze, and typing in the code boxes still works (keys not hijacked).
+**Done when:** with Bot A control = `keys`: `W` drives forward, `A`/`D` spin in place, `←`/`→` do a
+slower one-wheel swing (~half the yaw rate, pivoting on the planted wheel), nothing moves during the
+5 s freeze, arrow keys don't scroll the page, and typing in the code boxes still works (keys not
+hijacked).
 
 ---
 
