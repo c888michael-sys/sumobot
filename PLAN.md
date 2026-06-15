@@ -1,131 +1,247 @@
 # Build plan — SUMOBOTS
 
-This is the roadmap for finishing the project. **Phase 1 (the simulator) is done.**
-The remaining phases are written so another agent (e.g. Claude Sonnet) or a human can pick
-them up cold. Build everything against the simulator first, then port to hardware.
+Roadmap for finishing the project. **Phase 1 (the simulator) is done.** The rest is written so a
+fresh agent (e.g. Claude Sonnet) or a human can execute it **cold**, with no other context. Build
+against the simulator first, then port to hardware.
+
+**How to use this doc:** read *Invariants & gotchas* and the *Bot API contract* first — they prevent
+the most common mistakes. Then do the phases **in order** (2 before 3: the harness must exist before
+bots can be scored). Each phase lists explicit deliverables and a "done when" check.
 
 ---
 
 ## Context
 
-RAMSoc's **SUMOBOTS** is autonomous robot sumo: push the opponent out of a 120 cm ring.
-No remote control. 5 s start freeze. Best-of-3, 2 min rounds. A robot that stops moving for
-> 5 s loses. Two streams:
+RAMSoc's **SUMOBOTS**: autonomous robot sumo, push the opponent out of a 120 cm ring. No remote
+control. 5 s start freeze. Best-of-3, 2 min rounds. A robot that stops moving > 5 s loses. Streams:
 
-- **Standard** — UNSW only. Max 200 mm × 200 mm, 1 kg. Up to 4 IR + 4 ultrasonic sensors.
-  Max 2 driven wheels, no drivetrain mods. 1–5 A fuse.
-- **Open** — anyone. Max 250 mm × 250 mm, 1.5 kg. $200 budget ($100 on the RAMSoc base kit).
+- **Standard** — UNSW only. ≤ 200 mm × 200 mm, ≤ 1 kg. Up to 4 IR + 4 ultrasonic. Max 2 driven
+  wheels, no drivetrain mods. 1–5 A fuse.
+- **Open** — anyone. ≤ 250 mm × 250 mm, ≤ 1.5 kg. $200 budget ($100 on the RAMSoc base kit).
   Unrestricted drivetrain (still max 2 driven wheels). 1–10 A fuse.
 
-Banned: remote control, jamming (e.g. IR-saturating LEDs), weapons, liquids/powders/gases,
-throwing mechanisms, traction adhesives, magnets/vacuum for adhesion, sharp edges
-(radius must exceed 0.005″). Full summary in [RULES.md](RULES.md).
+Banned: remote control, IR jamming, weapons, liquids/powders/gases, throwing, traction adhesives,
+magnets/vacuum, sharp edges (radius must exceed 0.005″). Full summary in [RULES.md](RULES.md).
 
-## The competitive meta (design principles the bots should embody)
+## Competitive meta (what the bots should embody)
 
-1. **Never self-out.** Edge avoidance overrides every other behaviour. Most beginner losses
-   are driving yourself off, or stalling (opponent wins if you stop 5 s).
-2. **Get under the opponent.** A lower wedge strips their traction → you win the shove.
-3. **Weight + grip win pushing.** Pushing is traction-limited; use the full weight allowance,
-   kept low and forward, over high-grip wheels.
-4. **Find them fast, commit fully.** Efficient search, then full-power ram once detected.
-5. **Don't get baited into an orbit** (the rules grant a rematch if two bots circle with no
-   progress for 5 s — that resets any advantage). Cut inside and drive *through*.
+1. **Never self-out.** Edge avoidance overrides everything. Most losses are self-outs or stalls.
+2. **Get under the opponent.** Lower wedge strips their traction → you win the shove.
+3. **Weight + grip win pushing.** Pushing is traction-limited; use full weight, low and forward.
+4. **Find fast, commit fully.** Efficient search, then full-power ram.
+5. **Don't get baited into an orbit** (rules grant a rematch on no-progress circling — resets your
+   advantage). Cut inside and drive *through*.
+
+---
+
+## Invariants & gotchas (read before touching code)
+
+- **One file.** Everything is in `index.html` (one `<script>`). No build step, no dependencies.
+- **Units:** centimetres and cm/s. Ring radius `RING_R = 60`. Border `BORDER = 2.5`. Control tick
+  `DT = 1/120` s. Freeze `FREEZE = 5` s. Round `ROUND_TIME = 120` s. Stall = speed < `STALL_SPEED`
+  (4 cm/s) for `STALL_TIME` (5 s).
+- **Coordinates:** canvas-style — **x right, y DOWN**, origin at ring centre. Heading `theta`: 0 = +x,
+  `π/2` = +y (down), `π` = −x. `fwd = (cos θ, sin θ)`.
+- **Determinism:** the engine uses **no randomness**. The same two bots + same start produce the
+  **exact same match every time.** ⇒ a tournament is meaningless unless you *inject variance*
+  (see Phase 2). Do not skip this — it is the most common mistake.
+- **`memory` resets every round** (`Bot.place()` sets `memory = {}`). It persists across ticks
+  *within* a round only. Don't rely on cross-round memory.
+- **Strategy vs chassis boundary:** bot **code** only ever calls `setMotors()` (+ reads sensors).
+  Mass / wedge height / grip / size / max speed are **chassis config** (the dropdowns + number
+  fields), *not* something code sets. A "low wedge" strategy = set `wedge` low in config, not in code.
+- **Headless run gotchas** (you WILL need these for Phase 2):
+  - Set `running = false` first, or the `requestAnimationFrame` loop also calls `step()` → double steps.
+  - `step()` only advances when `state` is `countdown`/`running`/`roundover`/`matchwait`. Call
+    `startMatch()` to begin (it compiles the brains and enters `countdown`).
+  - A match only reaches `state === 'matchover'` when a bot wins **2 rounds**. Evenly-matched bots
+    draw rounds forever (the sim has no "3 ties → decision" yet). **Always loop with an iteration cap**
+    and a **max-rounds guard**, then decide by score. (Adding the max-rounds rule is a Phase 2 task.)
+- **Verifying in the browser:** the page runs a continuous render loop, so "wait for idle" screenshot
+  tools time out. Drive it from the devtools/`preview_eval` console instead: `running=false;
+  startMatch(); while(state!=='matchover' && i++<24000) step();` then read `scoreA/scoreB/A.pos/B.pos`.
+
+---
+
+## Bot API contract (authoritative)
+
+User code is the body of a function run every control tick (~120 Hz). It receives these in scope
+(this is the real signature in `compile()` — keep them in sync if you change it):
+
+```
+(enemy, sensors, edge, time, frozen, memory, setMotors, log, start)
+```
+
+| Name | Type | Meaning |
+|---|---|---|
+| `enemy` | `{detected:bool, distance:cm, bearing:deg}` | Fused opponent reading. `bearing` is signed: **+ = to your right, − = left, 0 = dead ahead**. `detected` is true if any IR ray hits **or** the opponent is within `SENSOR_RANGE` (80 cm) and inside ±`FOV` (75°). |
+| `sensors` | `[{angle:deg, distance:cm}]` | Raw IR rays at mount angles `[-40,-15,0,15,40]` (+ = right). `distance = Infinity` when the ray hits nothing. |
+| `edge` | `{fl,fr,bl,br}` (bool) | Corner line sensors — `true` when that corner is over the white border (radius > `RING_R - BORDER` = 57.5 cm). `f`=front, `b`=back, `l`=left, `r`=right. |
+| `time` | number (s) | Seconds since the freeze ended. **Negative during the 5 s countdown.** |
+| `frozen` | bool | `true` during the countdown. Motors are ignored while frozen, but **sensors are live** — plan into `memory`. |
+| `memory` | object | Your RAM. Persists across ticks within a round; **reset each round**. |
+| `setMotors(l, r)` | fn | Drive. Each wheel `−1…1` (clamped). Differential drive: `(1,1)` = forward, `(1,-1)` = spin right, `(-1,-1)` = reverse. |
+| `log(...)` | fn | Print to the console panel (throttled). |
+| `start` | int `1–4` | Which Figure-2 start position you chose. **Pos 1 faces *outward*** (away from the opponent) — a bot starting there must turn ~180° first. Pos 4 is head-on. Branch on this if useful. |
+
+**Chassis config** (per bot, set in the UI, stored in `cfgA`/`cfgB`): `mass` (kg), `len`/`wid` (cm),
+`wedge` (0–1, lower = gets under), `mu` (grip), `maxSpeed` (cm/s), plus `start` position (1–4).
+
+**A bot is just the text** you paste into the Bot A / Bot B box. Store each strategy as a file under
+`bots/<name>.js` whose **entire contents are that paste-ready body** (no wrapper function, no exports).
 
 ---
 
 ## Phase 1 — Simulator ✅ DONE
 
-`index.html`. Top-down 2D rigid-body physics with traction-limited pushing and a wedge
-under-ride model; faithful match rules; paste-in JS bots; per-bot chassis config.
+`index.html`: top-down 2D rigid-body physics, traction-limited pushing, wedge under-ride model,
+faithful match rules, four Figure-2 start positions, paste-in JS bots, per-bot chassis config.
 
-**Simulator architecture** (all in `index.html`, one `<script>`):
+**Architecture** (all in the one `<script>`):
+- `V` — 2D vector helpers.
+- `Bot` — pose, velocity, mass/inertia, chassis cfg, `corners()` polygon, `place()`, `applyCfg()`.
+- `driveBot()` — per-wheel tire model; each wheel drives toward its commanded longitudinal speed and
+  kills lateral slip, **capped by `µ·N·tractionMod`** → realistic slip + pushing.
+- `collide()` / `resolve()` — SAT polygon collision + impulse resolution. `resolve()` also computes
+  the **wedge under-ride**: a bot facing the other with a lower `wedge` sets the other's
+  `tractionMod < 1` (constant `K`).
+- `senseFor()` — IR rays (`rayHitsPoly`), fused `enemy`, four corner edge sensors.
+- `compile()` / `runBrain()` — wraps user code in a `Function`, runs it each tick.
+- `START_A` / `START_B` + `setupRound()` — the four start positions (mirrored) and round setup.
+- Match controller — `startMatch`, `step`, `checkRound`, `endRound`; states
+  `idle → countdown → running → roundover → (matchwait) → matchover`.
+- `render()` + rAF loop; UI wiring + `localStorage` persistence at the bottom.
 
-- `V` — 2D vector helpers (canvas coords: x right, y down).
-- `Bot` — pose, velocity, mass/inertia, chassis cfg, `corners()` polygon.
-- `driveBot()` — per-wheel tire model. Each wheel applies an impulse toward its commanded
-  longitudinal speed and kills lateral slip, **capped by `µ·N·tractionMod`** → realistic slip
-  and pushing.
-- `collide()` / `resolve()` — SAT polygon collision + impulse resolution. `resolve()` also
-  computes the **wedge under-ride**: if a bot faces the other and has a lower `wedge`, it sets
-  the other's `tractionMod < 1`.
-- `senseFor()` — IR rays (`rayHitsPoly`), fused `enemy` reading (gated by range + FOV), and
-  four corner edge sensors.
-- `compile()` / `runBrain()` — wraps user code in a `Function` and runs it each control tick.
-- Match controller — `setupRound`, `startMatch`, `step`, `checkRound`, `endRound` (states:
-  `idle → countdown → running → roundover → matchwait → matchover`).
-- `render()` + rAF loop. UI wiring + localStorage persistence at the bottom.
-
-**Tuning knobs** (top of script): `RING_R`, `BORDER`, `SENSOR_RANGE`, `FOV`, `MOUNT_ANGLES`,
-`DT`, `STALL_*`, `ROUND_TIME`, `FREEZE`, and the wedge constant `K` in `resolve()`.
+**Tuning knobs** (top of script): `RING_R`, `BORDER`, `SENSOR_RANGE`, `FOV`, `MOUNT_ANGLES`, `DT`,
+`STALL_*`, `ROUND_TIME`, `FREEZE`, and the wedge constant `K` in `resolve()`.
 
 ---
 
-## Phase 2 — Strategy bots
+## Phase 2 — Headless tournament harness (do this FIRST)
 
-Write several distinct bots as standalone JS snippets (one per file under `bots/`) that paste
-into the A/B boxes. Each must lead with edge-avoidance. Implement at least:
+Single matches are deterministic and noisy at symmetry, so scoring needs many *varied* matches.
 
-- **`rammer`** — the baseline: edge-safe, search-spin, charge straight (already the in-app default).
-- **`flanker`** — when enemy detected, arc to approach their **side/rear** (where their wedge
-  can't engage) instead of head-on; use `enemy.bearing` history in `memory`.
-- **`edge-lurer`** — bait near the ring edge, then sidestep so a charging opponent self-outs;
-  needs careful edge-sensor logic so it doesn't self-out first.
-- **`juker`** — quick feints: dash off-axis at the last moment before contact to slip the
-  opponent's wedge, then hit their flank.
-- **`spiral-searcher`** — expanding-spiral search that guarantees full-ring coverage fast, then
-  commits.
+**2a. Add a max-rounds guard** so evenly-matched bots can't loop forever. In `checkRound()`/round
+flow: if `round` exceeds e.g. 7 with no 2-round winner, end the match as a **draw** (set
+`state='matchover'`, winner = higher score or draw).
 
-**Acceptance:** each bot beats `rammer` over a tournament (see Phase 3) more often than it loses,
-or has a clear documented niche. Keep every bot edge-safe (verify it never self-outs in 100 runs).
+**2b. Inject variance** (required — see determinism gotcha). Add a tournament-only randomisation,
+e.g. a `randomizeStart()` that, before each match, sets `startA`/`startB` to a random 1–4 **and**
+jitters each start heading by ±15° (add a small `theta += (rand-0.5)*0.5` in `setupRound`, gated by a
+`JITTER` flag so single interactive matches stay clean). Optionally seedable for reproducibility.
 
-## Phase 3 — Headless tournament harness
+**2c. Run loop.** Add a "Run N (headless)" button + count input. Reference implementation:
 
-Single matches are noisy (symmetry → draws). Add a way to run **N matches A-vs-B headlessly**
-and report win %, average margin, and self-out rate. Two options:
+```js
+function runMatches(n){
+  running = false;                          // stop rAF double-stepping
+  let a=0, b=0, draws=0;
+  for(let m=0; m<n; m++){
+    randomizeStart();                        // variance — or every match is identical
+    startMatch();                            // compile + countdown
+    let i=0;
+    while(state!=='matchover' && i<200*120){ step(); i++; }  // hard cap ~200s
+    if(scoreA>scoreB) a++; else if(scoreB>scoreA) b++; else draws++;
+  }
+  return {a, b, draws, winPctA:(a/n*100).toFixed(1)};
+}
+```
 
-- In-page "Run 100" button that loops the existing `step()` with rendering off and tallies results, or
-- A Node script that imports the pure-physics functions (refactor them out of `index.html` into
-  a small `engine.js` shared by both the page and Node).
+Report **win % A / win % B / draw %** (extend to track avg margin and self-out rate if useful).
+Keep it in-page (reuse `step()`); **do not** refactor the physics into a separate `engine.js` unless
+you first snapshot the working file — that refactor is the highest-risk change in this plan.
 
-**Acceptance:** `A vs B, n=100` returns stable win percentages and runs in a few seconds.
+**Done when:** `runMatches(100)` for two *different* bots returns **non-identical, stable** win
+percentages and finishes in a few seconds; identical bots return ≈ 50/50 (within noise) plus draws.
+
+## Phase 3 — Strategy bots
+
+Write each as a paste-ready `bots/<name>.js` (body only). **Every bot must start with the same
+edge-guard preamble** (copy from the in-app default bot) so it never self-outs. Implement at least:
+
+- **`rammer`** — baseline: edge-safe, spin-search, charge straight (= current in-app default).
+- **`flanker`** — on detect, arc to the opponent's **side/rear** (where their wedge can't engage)
+  using `enemy.bearing` history in `memory`, instead of charging head-on.
+- **`edge-lurer`** — bait near the rim, sidestep so a charging opponent self-outs; needs very careful
+  edge logic so it doesn't self-out first.
+- **`juker`** — feint: dash off-axis just before contact to slip the opponent's wedge, then hit a flank.
+- **`spiral-searcher`** — expanding-spiral search for fast full-ring coverage, then commit.
+
+**Optional loader** (nice-to-have): add a per-bot dropdown that does
+`fetch('bots/'+name+'.js').then(r=>r.text()).then(t=>codeX.value=t)` from a `bots/manifest.json`.
+Note this needs the page **served over http** (the `sumo-sim` launch config), not opened as `file://`.
+
+**Done when:** each bot, scored by the Phase 2 harness over n≥100, **beats `rammer` more than it
+loses** *or* has a documented niche; and **self-outs in 0 of 100** runs.
 
 ## Phase 4 — Realism pass (optional but recommended)
 
-- Add **sensor noise** (jitter on `enemy.distance/bearing`, occasional missed detection) and a
-  toggle, so strategies don't overfit to perfect sensing.
-- Add **configurable sensor layouts** (number/angles of IR sensors; ultrasonic vs IR range) to
-  match what the team actually mounts.
-- Add **randomised start positions/headings** to test robustness.
-- ~~**Model the 4 starting positions (§3.3 / Figure 2).**~~ ✅ **DONE.** Each bot picks one of the four
-  Figure-2 spots (position + heading) via a dropdown; the choice is exposed to bot code as `start`
-  (1–4) and drawn as faint numbered markers. Geometry lives in `START_A`/`START_B` in `index.html`.
-  Headings: pos 1 inner/faces-out, 2 top/angled-in, 3 bottom/angled-in, 4 outer/head-on (mirrored for B).
+- **Sensor noise** — jitter `enemy.distance/bearing`, occasional missed detection; behind a toggle so
+  strategies don't overfit to perfect sensing.
+- **Configurable sensor layouts** — number/angles of IR rays; ultrasonic vs IR range — to match the
+  real mounted hardware.
+- ~~**Model the 4 starting positions (§3.3 / Figure 2).**~~ ✅ **DONE** in Phase 1. Each bot picks one
+  of four spots (position + heading) via a dropdown; exposed to code as `start` (1–4); drawn as faint
+  numbered markers. Geometry in `START_A`/`START_B`. Headings: 1 inner/faces-out, 2 top/angled-in,
+  3 bottom/angled-in, 4 outer/head-on (B mirrored).
 
 ## Phase 5 — Hardware firmware port
 
-Port the winning strategy to the real robot. The sim API maps 1:1 to firmware:
+Port the winning strategy to the robot. The sim API maps 1:1 to firmware:
 
 | Sim | Hardware (Arduino/C) |
 |---|---|
-| `enemy` / `sensors` | Sharp IR distance sensors + ultrasonic, fused into bearing/range |
+| `enemy` / `sensors` | Sharp IR distance + ultrasonic, fused into bearing/range |
 | `edge.fl/fr/bl/br` | downward IR reflectance sensors at the corners (white-line detect) |
-| `setMotors(l, r)` | PWM to the two motor drivers (−1…1 → direction + duty) |
-| `memory` | global state struct |
-| control tick | the `loop()` at a fixed rate |
+| `setMotors(l, r)` | PWM to the two motor drivers (sign → direction, magnitude → duty) |
+| `memory` | a `static` state struct |
+| control tick | `loop()` at a fixed rate |
 
-Respect stream constraints: max 2 driven wheels; Standard = no drivetrain mods; fuse fitted;
-no banned mechanisms. Keep the 5 s start delay in firmware.
+Skeleton translating the default bot (pseudo-Arduino; fill in pins/drivers for the team's BOM):
 
-**Acceptance:** the robot reproduces the simulated behaviour: searches, charges, and — most
-importantly — never drives itself out and never stalls.
+```c
+void loop() {
+  Edge e = readEdges();                 // 4 reflectance sensors vs white-line threshold
+  if (millis() - startMs < 5000) { drive(0,0); return; }   // 5 s freeze
+
+  if (e.fl && e.fr)      { drive(-1,-1); return; }          // self-preservation first
+  else if (e.fl)         { drive(0.6,-1); return; }
+  else if (e.fr)         { drive(-1,0.6); return; }
+  else if (e.bl || e.br) { drive(1,1);  return; }
+
+  Enemy en = senseEnemy();              // fuse IR + ultrasonic → detected/bearing
+  if (en.detected) {
+    if (en.bearing >  12) drive(1, 0.15);
+    else if (en.bearing < -12) drive(0.15, 1);
+    else drive(1, 1);                   // charge
+    return;
+  }
+  drive(0.55, -0.55);                   // search spin
+}
+```
+
+Respect stream constraints: max 2 driven wheels; Standard = no drivetrain mods; fuse fitted (1–5 A
+Standard / 1–10 A Open); no banned mechanisms; keep the 5 s start delay.
+
+**Done when:** on the real ring the robot searches, charges, and — above all — **never self-outs and
+never stalls**.
 
 ---
 
-## How to verify changes (any phase)
+## Suggested file layout / deliverables
 
-`index.html` runs a continuous render loop, so screenshot tools that wait for "page idle" will
-time out. To drive it headlessly in a browser/devtools console: call `startMatch()` then loop
-`step()` and read `state`, `scoreA`, `scoreB`, `A.pos`, `B.pos`. Asymmetric configs should give
-decisive results (a low/heavy wedge reliably beats a high/light one by push-out); identical bots
-should mostly draw.
+```
+index.html            the simulator (+ harness button after Phase 2)
+bots/
+  rammer.js           paste-ready control-loop bodies
+  flanker.js
+  edge-lurer.js
+  juker.js
+  spiral-searcher.js
+  manifest.json       (if you add the loader dropdown)
+firmware/
+  sumobot.ino         the C port (Phase 5)
+README.md  PLAN.md  RULES.md
+```
+
+Commit per phase; keep `index.html` runnable at every commit (snapshot before any big refactor).
