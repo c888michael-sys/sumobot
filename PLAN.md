@@ -490,6 +490,63 @@ touches* decides whether you get under. (Build this BEFORE the presets feature, 
 now depends on where contact lands (A wins when it lands left-side contact, loses when it presents its
 high right side), and the ⚔ harness reflects it.
 
+## Feature — Wedge under-ride consequence: ride-up overlap + speed penalty
+
+Today the under-ride only strips the upper bot's traction (`strip()`), but the collision still pushes
+both bots apart **equally**, so the lower wedge never visibly *gets under* and the consequence is weak.
+Add the missing physical consequence: when one bot's wedge is lower at the contact, it **rides under**
+(gains overlap / keeps advancing) and the upper bot gets a **speed/push penalty** — both scaled by the
+wedge-height gap. All changes are in `resolve()`. *(Line numbers approximate.)*
+
+1. **Compute who's under whom first.** Move the wedge-height/face calc *above* the positional
+   correction and derive a `lift` (0–1) per bot from the height gap (`liftB>0` ⇒ B is on top):
+   ```js
+   const dirAB=V.norm(V.sub(B.pos,A.pos));
+   const faceA=V.dot(A.fwd(),dirAB), faceB=V.dot(B.fwd(),V.mul(dirAB,-1));
+   const wA=wedgeAt(A,c.cp), wB=wedgeAt(B,c.cp);
+   const RIDE=2.0;                                  // how strongly a height gap converts to ride-up (tune)
+   let liftA=0, liftB=0;
+   if(faceA>0.3 && wA<wB) liftB=clamp((wB-wA)*RIDE,0,1);   // A got under -> B is lifted
+   if(faceB>0.3 && wB<wA) liftA=clamp((wA-wB)*RIDE,0,1);
+   const lift=Math.max(liftA,liftB);
+   ```
+
+2. **Overlap** — bias the positional correction onto the *lifted* bot so the lower one advances into it
+   (instead of the current equal `invMass` split):
+   ```js
+   const tot=A.invMass+B.invMass, corr=Math.max(depth-0.05,0)*0.8;
+   let shareA=A.invMass/tot, shareB=B.invMass/tot;
+   if(liftB>0){ shareB+=shareA*liftB; shareA*=(1-liftB); }  // A under -> A barely pushed back -> overlaps B
+   if(liftA>0){ shareA+=shareB*liftA; shareB*=(1-liftA); }
+   A.pos=V.sub(A.pos,V.mul(n,corr*shareA));
+   B.pos=V.add(B.pos,V.mul(n,corr*shareB));
+   ```
+
+3. **Less bounce while engaged** — make the normal impulse inelastic when under-riding so the lower bot
+   stays locked on and shoves rather than bouncing off. Replace the fixed restitution `-(1.0)*vn` with
+   `-(1.0-0.9*lift)*vn`.
+
+4. **Speed/push penalty on the upper bot** — keep the existing `strip()` traction cut, and add a direct
+   velocity damp on whoever is lifted:
+   ```js
+   if(liftB>0){ B.tractionMod=Math.min(B.tractionMod,strip(wA,wB)); B.vel=V.mul(B.vel,1-0.2*liftB); }
+   if(liftA>0){ A.tractionMod=Math.min(A.tractionMod,strip(wB,wA)); A.vel=V.mul(A.vel,1-0.2*liftA); }
+   ```
+   (This replaces the old two `strip()` lines.)
+
+- **Tuning:** `RIDE` (2.0), the velocity damp (0.2), and the restitution drop (0.9) are starting values.
+  Tune in the ⚔ harness so a **lower wedge clearly out-shoves a higher one** (bigger win margin than
+  today) **without** being an instant game-over, and identical wedges stay ~50/50.
+- **Stability caveat:** letting the lower bot overlap is a 2D stand-in for 3D ride-up — bots will visibly
+  overlap a little while one is under. Keep the `depth-0.05` deadband so they can't tunnel through each
+  other; if two bots ever get stuck interpenetrating, cap `liftA/liftB` lower.
+- **Render (optional):** draw the lower (under) bot *after* the upper one so its nose visibly tucks
+  beneath — reinforces the "got under" read.
+
+**Done when:** a low-wedge bot vs a high-wedge bot now visibly drives *under* and pushes the high one
+out with a clear margin (and the upper bot is slowed while ridden), the effect scales with the wedge-
+height gap, identical wedges still draw ~50/50, and no two bots get stuck overlapping.
+
 ## Feature — Chassis presets (incl. "Prototype side wedge")
 
 One-click named chassis setups (config + optional bot code + start position), so you can load a whole
