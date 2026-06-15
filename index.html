@@ -353,7 +353,7 @@ function resolve(A,B){
   // ---- front-to-side: nose on the opponent's flank lets you drive them ----
   // attacker faces the target (face*>~0.55) AND the target is broadside (its facing is
   // ~perpendicular to the line of contact, |face|<0.5) -> the T-boned bot loses grip.
-  const SIDE=0.25;                                   // grip the side-hit bot keeps (low = easy to push)
+  const SIDE=SIDEPUSH;                               // grip the side-hit bot keeps (low = easy to push)
   if(faceA>0.55 && Math.abs(faceB)<0.5) B.tractionMod=Math.min(B.tractionMod,SIDE);
   if(faceB>0.55 && Math.abs(faceA)<0.5) A.tractionMod=Math.min(A.tractionMod,SIDE);
 }
@@ -429,6 +429,7 @@ const START_B={1:mirrorPos(START_A[1]),2:mirrorPos(START_A[2]),3:mirrorPos(START
 let startA=4, startB=4;
 let ctrlA='code', ctrlB='code';   // 'code' = run the bot script, 'mouse' = drive to clicks
 let JITTER=0;                      // start-heading jitter (rad) — set during tournaments only
+let SIDEPUSH=0.25;                 // grip a flank-hit bot keeps (1 = side-push off, lower = more lethal)
 const MAX_ROUNDS=7;               // safety cap so endless draws can't loop forever
 
 function setupRound(){

@@ -56,6 +56,29 @@ rammer (wedge 0.5) vs rammer (wedge 0.1, mass 1.5)  ->  the low heavy wedge wins
 traction) and a simple, robust rammer that **never self-outs and never stalls** — not on elaborate
 strategy. The fancy bots here are kept as a teaching set showing *why* the clever moves underperform.
 
+## Is "broadside = death" too harsh? — measured, no
+
+The front-to-side push (`SIDEPUSH` in `index.html`, grip a flank-hit bot keeps; default `0.25`,
+`1.0` = off) was swept against `flanker` vs `rammer` and `rammer` vs `rammer` (equal chassis):
+
+| SIDEPUSH | flanker W | rammer W | draws | rammer-v-rammer draws |
+|---|---|---|---|---|
+| 1.0 (off) | ~7% | ~27% | **~67%** | ~58% |
+| 0.5 | ~20% | ~43% | ~37% | — |
+| 0.25 (default) | ~20% | ~60% | ~20% | ~54% |
+| 0.1 (lethal) | ~21% | ~54% | ~25% | — |
+
+Reads: (1) the flanker's win rate barely moves (~7–21%) across the whole range — **the side-push is
+not what's stopping turning strategies from winning.** (2) Turning it *off* just floods the game with
+draws (~67%) — it's the main thing that makes matches *decisive*. (3) The head-on draw rate
+(rammer-v-rammer) is ~independent of it, so those draws come from the stall, not the side-push.
+
+**Conclusion: keep the side-push (~0.25). It's realistic and it's the decisiveness mechanism.**
+Softening it does not revive strategy — it just adds draws. What actually makes strategy/positioning
+matter is the *environment*: a bigger ring, limited sensor FOV/range, sensor noise, detection latency
+(Phase 4). At equal chassis in a small ring with near-instant detection, a front-facing aggressor is
+just hard to out-think.
+
 ## Run your own tournament
 
 1. Load a bot into A and another into B (or paste).

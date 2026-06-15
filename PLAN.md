@@ -113,7 +113,10 @@ faithful match rules, four Figure-2 start positions, paste-in JS bots, per-bot c
 - `render()` + rAF loop; UI wiring + `localStorage` persistence at the bottom.
 
 **Tuning knobs** (top of script): `RING_R`, `BORDER`, `SENSOR_RANGE`, `FOV`, `MOUNT_ANGLES`, `DT`,
-`STALL_*`, `ROUND_TIME`, `FREEZE`, and the wedge constant `K` in `resolve()`.
+`STALL_*`, `ROUND_TIME`, `FREEZE`, the wedge constant `K` in `resolve()`, and `SIDEPUSH` (grip a
+flank-hit bot keeps; `1.0` = front-to-side push off). Measured: `SIDEPUSH≈0.25` is the sweet spot —
+it makes matches decisive without being the thing that suppresses strategy (see
+[bots/README.md](bots/README.md)); strategy diversity is gated by arena/sensing, not by `SIDEPUSH`.
 
 ---
 
