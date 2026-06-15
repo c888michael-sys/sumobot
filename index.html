@@ -193,6 +193,44 @@
       </details>
     </div>
 
+    <div class="card">
+      <details>
+        <summary>Arena &amp; sensor config</summary>
+        <div style="margin-top:10px">
+          <div class="row">
+            <label class="fld">ring radius (cm)
+              <input id="ringR" type="number" step="5" min="40" max="100" value="60">
+            </label>
+            <label class="fld">sensor range (cm)
+              <input id="sensorRange" type="number" step="5" min="20" max="150" value="80">
+            </label>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <label class="fld">IR layout
+              <select id="sensorPreset">
+                <option value="5wide">5-ray spread (−40 −15 0 +15 +40)</option>
+                <option value="4std">4-ray Standard (−30 −10 +10 +30)</option>
+                <option value="3ctr">3-ray center (−20 0 +20)</option>
+                <option value="2wide">2-ray wide (−45 +45)</option>
+                <option value="1fwd">1-ray front (0°)</option>
+                <option value="custom">Custom angles…</option>
+              </select>
+            </label>
+          </div>
+          <div id="customAnglesRow" style="display:none;margin-top:6px">
+            <label class="fld" style="width:100%">custom angles (deg, comma-sep, +right)
+              <input id="customAngles" type="text" placeholder="-40,-15,0,15,40" value="-40,-15,0,15,40">
+            </label>
+          </div>
+          <div class="chk" style="margin-top:8px">
+            <input type="checkbox" id="sensorNoise">
+            <label for="sensorNoise">sensor noise — ±8% dist, ±6° bearing, 3–15% miss rate</label>
+          </div>
+        </div>
+        <div class="small" style="margin-top:6px">Changes apply immediately. Bigger ring + noise make positioning and search strategies matter more.</div>
+      </details>
+    </div>
+
     <div class="card legend">
       <details>
         <summary>How to write a bot (API)</summary>
@@ -240,11 +278,12 @@ const DEG=180/Math.PI, RAD=Math.PI/180;
 const G=981; // cm/s^2
 
 /* ---------- world constants (centimetres) ---------- */
-const RING_R=60;        // 120 cm outer diameter
+let RING_R=60;          // 120 cm outer diameter — UI-configurable
 const BORDER=2.5;       // white border line
-const SENSOR_RANGE=80;  // IR/ultrasonic range
+let SENSOR_RANGE=80;    // IR/ultrasonic range — UI-configurable
 const FOV=75*RAD;       // half field-of-view for enemy detection
-const MOUNT_ANGLES=[-40,-15,0,15,40]; // IR ray mount angles (deg, +right)
+let MOUNT_ANGLES=[-40,-15,0,15,40]; // IR ray mount angles — UI-configurable
+let SENSOR_NOISE=false; // sensor noise injection toggle
 const DT=1/120, SUBSTEPS=2;
 const STALL_SPEED=4, STALL_TIME=5, ROUND_TIME=120, FREEZE=5;
 
@@ -388,6 +427,19 @@ function senseFor(self,other){
   const [fr,fl,bl,br]=self.corners(); // order: FR, FL, BL, BR (front=+len)
   const over=p=>V.len(p)>RING_R-BORDER;
   const edge={fr:over(fr),fl:over(fl),bl:over(bl),br:over(br)};
+  // sensor noise — gated by SENSOR_NOISE toggle
+  if(SENSOR_NOISE){
+    // miss probability rises from 3% at 80% of range to 15% at full range
+    const missP=0.03+0.12*Math.max(0,(dist/SENSOR_RANGE-0.8)/0.2);
+    if(enemy.detected && Math.random()<missP){
+      enemy.detected=false;
+    } else if(enemy.detected){
+      enemy.distance=+Math.max(1,enemy.distance*(1+(Math.random()-.5)*0.16)).toFixed(1);
+      enemy.bearing=+((enemy.bearing+(Math.random()-.5)*12)).toFixed(1);
+    }
+    for(const r of rays) if(isFinite(r.distance))
+      r.distance=+Math.max(1,r.distance*(1+(Math.random()-.5)*0.16)).toFixed(1);
+  }
   return {enemy,sensors:rays,edge};
 }
 
@@ -403,9 +455,10 @@ function compile(code){
 /* =================== match controller =================== */
 const cv=document.getElementById('arena'), ctx=cv.getContext('2d');
 const W=cv.width,H=cv.height, MARGIN=18;
-const SCALE=(Math.min(W,H)-2*MARGIN)/(2*RING_R);
+let SCALE=(Math.min(W,H)-2*MARGIN)/(2*RING_R);
 const toPx=p=>({x:W/2+p.x*SCALE,y:H/2+p.y*SCALE});
 const fromPx=p=>({x:(p.x-W/2)/SCALE,y:(p.y-H/2)/SCALE});
+function updateScale(){ SCALE=(Math.min(W,H)-2*MARGIN)/(2*RING_R); }
 
 const cfgA={mass:1,len:18,wid:18,wedge:.5,mu:1,maxSpeed:80};
 const cfgB={mass:1,len:18,wid:18,wedge:.5,mu:1,maxSpeed:80};
@@ -417,15 +470,21 @@ let round=1, scoreA=0, scoreB=0, t=0, roundResultTimer=0, banner='';
 let logThrottle={};
 
 /* start positions (Figure 2): 4 spots per side, mirrored across the centre line.
-   th = heading (forward), where 0=+x (toward opponent for A), PI=-x. */
-const START_A={
-  1:{x:-12,y:  0,th:Math.PI},     // inner, by centre line, faces outward (←)
-  2:{x:-22,y:-22,th:Math.PI/4},   // top, angled into the centre (↘)
-  3:{x:-22,y: 22,th:-Math.PI/4},  // bottom, angled into the centre (↗)
-  4:{x:-30,y:  0,th:0},           // outer, head-on toward opponent (→)
-};
-const mirrorPos=p=>({x:-p.x,y:p.y,th:Math.PI-p.th});
-const START_B={1:mirrorPos(START_A[1]),2:mirrorPos(START_A[2]),3:mirrorPos(START_A[3]),4:mirrorPos(START_A[4])};
+   th = heading (forward), where 0=+x (toward opponent for A), PI=-x.
+   Stored as fractions of RING_R so they scale when the ring is resized. */
+let START_A, START_B;
+function updateStartPositions(){
+  const r=RING_R;
+  START_A={
+    1:{x:-r*0.20,  y:0,        th:Math.PI},    // inner, faces outward (←)
+    2:{x:-r*0.367, y:-r*0.367, th:Math.PI/4},  // top, angled in (↘)
+    3:{x:-r*0.367, y: r*0.367, th:-Math.PI/4}, // bottom, angled in (↗)
+    4:{x:-r*0.50,  y:0,        th:0},           // outer, head-on (→)
+  };
+  const m=p=>({x:-p.x,y:p.y,th:Math.PI-p.th});
+  START_B={1:m(START_A[1]),2:m(START_A[2]),3:m(START_A[3]),4:m(START_A[4])};
+}
+updateStartPositions();
 let startA=4, startB=4;
 let ctrlA='code', ctrlB='code';   // 'code' = run the bot script, 'mouse' = drive to clicks
 let JITTER=0;                      // start-heading jitter (rad) — set during tournaments only
@@ -716,6 +775,31 @@ document.getElementById('loadA').onchange=e=>{loadBotInto('A',e.target.value);e.
 document.getElementById('loadB').onchange=e=>{loadBotInto('B',e.target.value);e.target.selectedIndex=0;};
 loadBotList();
 document.getElementById('speed').oninput=e=>{speed=+e.target.value;document.getElementById('speedv').textContent=speed.toFixed(2)+'×';};
+// ---- arena & sensor config ----
+const SENSOR_PRESETS={'5wide':[-40,-15,0,15,40],'4std':[-30,-10,10,30],'3ctr':[-20,0,20],'2wide':[-45,45],'1fwd':[0]};
+function applySensorPreset(v){
+  if(v==='custom'){
+    document.getElementById('customAnglesRow').style.display='';
+    const a=document.getElementById('customAngles').value.split(',').map(s=>+s.trim()).filter(n=>!isNaN(n)&&n>=-90&&n<=90);
+    if(a.length) MOUNT_ANGLES=a;
+  } else {
+    document.getElementById('customAnglesRow').style.display='none';
+    MOUNT_ANGLES=SENSOR_PRESETS[v]||[-40,-15,0,15,40];
+  }
+}
+document.getElementById('ringR').oninput=e=>{
+  RING_R=Math.max(40,Math.min(100,+e.target.value||60));
+  updateScale(); updateStartPositions();
+  if(state==='idle'){setupRound();state='idle';}
+  save();
+};
+document.getElementById('sensorRange').oninput=e=>{ SENSOR_RANGE=Math.max(20,Math.min(150,+e.target.value||80)); save(); };
+document.getElementById('sensorNoise').onchange=e=>{ SENSOR_NOISE=e.target.checked; save(); };
+document.getElementById('sensorPreset').onchange=e=>{ applySensorPreset(e.target.value); save(); };
+document.getElementById('customAngles').oninput=e=>{
+  const a=e.target.value.split(',').map(s=>+s.trim()).filter(n=>!isNaN(n)&&n>=-90&&n<=90);
+  if(a.length){ MOUNT_ANGLES=a; save(); }
+};
 codeA.oninput=save; codeB.oninput=save;
 document.querySelectorAll('input[data-k]').forEach(inp=>{
   inp.oninput=()=>{const tgt=inp.dataset.bot==='A'?cfgA:cfgB;tgt[inp.dataset.k]=+inp.value;save();};
@@ -744,7 +828,12 @@ window.addEventListener('pointerup',()=>{dragging=false;});
 
 /* ---------- persistence ---------- */
 function save(){
-  try{localStorage.setItem('sumo',JSON.stringify({a:codeA.value,b:codeB.value,cfgA,cfgB,startA,startB,ctrlA,ctrlB}));}catch(e){}
+  try{localStorage.setItem('sumo',JSON.stringify({
+    a:codeA.value,b:codeB.value,cfgA,cfgB,startA,startB,ctrlA,ctrlB,
+    ringR:RING_R,sensorRange:SENSOR_RANGE,sensorNoise:SENSOR_NOISE,
+    sensorPreset:document.getElementById('sensorPreset').value,
+    customAngles:document.getElementById('customAngles').value,
+  }));}catch(e){}
 }
 function load(){
   try{
@@ -752,6 +841,15 @@ function load(){
     if(s){codeA.value=s.a;codeB.value=s.b;Object.assign(cfgA,s.cfgA);Object.assign(cfgB,s.cfgB);
       if(s.startA)startA=s.startA; if(s.startB)startB=s.startB;
       if(s.ctrlA)ctrlA=s.ctrlA; if(s.ctrlB)ctrlB=s.ctrlB;
+      // arena & sensor settings
+      if(s.ringR){RING_R=s.ringR;document.getElementById('ringR').value=RING_R;updateScale();updateStartPositions();}
+      if(s.sensorRange){SENSOR_RANGE=s.sensorRange;document.getElementById('sensorRange').value=SENSOR_RANGE;}
+      if(s.sensorNoise!=null){SENSOR_NOISE=s.sensorNoise;document.getElementById('sensorNoise').checked=SENSOR_NOISE;}
+      if(s.sensorPreset){
+        document.getElementById('sensorPreset').value=s.sensorPreset;
+        if(s.customAngles) document.getElementById('customAngles').value=s.customAngles;
+        applySensorPreset(s.sensorPreset);
+      }
       document.querySelectorAll('input[data-k]').forEach(inp=>{const t=inp.dataset.bot==='A'?cfgA:cfgB;inp.value=t[inp.dataset.k];});
       const selA=document.querySelector('select[data-start="A"]');if(selA)selA.value=startA;
       const selB=document.querySelector('select[data-start="B"]');if(selB)selB.value=startB;
