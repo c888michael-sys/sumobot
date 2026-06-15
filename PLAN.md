@@ -328,13 +328,14 @@ hijacked).
 
 ---
 
-## Feature — Match recorder: replay + step trace of winning rounds
+## Feature — Match recorder: movement trace + path diagram of winning rounds
 
-Auto-record every round; when a bot **wins**, keep that round so you can (a) **re-watch** it on the
-arena with play/pause/scrub, (b) read a **per-step trace** of the winner's decisions, and (c)
-**export it as JSON**. Store actual per-tick frames (poses + motor commands + sensor/decision state)
-so it works for `code`, `mouse`, and `keys` bots — human input isn't reproducible from initial
-conditions, so re-running won't recreate a manual win; recorded frames will.
+Auto-record every round; when a bot **wins**, keep that round so you can review *how* it won without
+a video: (a) a **movement trace** — a timestamped, human-readable list of the winner's moves with
+magnitudes (e.g. `t=0.30  turn right 41°`, `t=0.55  forward 18 cm`, `t=0.80  side hit → push-out`),
+and (b) a **path diagram** — both bots' trajectories drawn on the ring (start → end, with heading and
+the contact / push-out points). Plus **JSON export**. Store actual per-tick frames (poses + motor
+commands + sensor state) as the data source — works for `code`, `mouse`, and `keys` bots.
 *(Line numbers approximate — anchor on the function names.)*
 
 **State** (near the other globals):
@@ -344,8 +345,8 @@ let rec = [];             // current round's frames
 let replays = [];         // saved winning rounds (newest first, cap ~10)
 const REC_EVERY = 2;      // record every Nth control tick (~60 Hz) to halve memory; 1 = every tick
 let recTick = 0;
-let mode = 'live';        // 'live' | 'replay'
-let player = null;        // { frames, meta, i, playing, speed }
+let view = 'live';        // 'live' | 'diagram' — when 'diagram', the arena shows a saved win's path
+let shownReplay = null;   // the replay currently drawn as a path diagram
 const anyEdge = e => e.fl || e.fr || e.bl || e.br;
 ```
 
@@ -390,42 +391,55 @@ const anyEdge = e => e.fl || e.fr || e.bl || e.br;
 5. **Gate OFF in tournaments** — in `runMatches()`, save+set `recording=false` at the start and restore
    it at the end (otherwise it allocates frames for all N matches).
 
-6. **Playback (no physics — replays stored frames).** Add a replay render path:
-   - Enter: `mode='replay'; player={frames:r.frames, meta:r.meta, i:0, playing:true, speed:1};`
-   - In the `frame()` loop: when `mode==='replay'`, advance `player.i += player.speed` (clamp to
-     `frames.length-1`, stop at end) and call `renderReplay()` instead of the live `render()`.
-   - `renderReplay()`: draw the ring (factor the ring-draw out of `render()` so both reuse it), then
-     two bot polygons at `frames[i].a`/`.b` using `meta.cfgA/cfgB` sizes + the A/B colors, plus a HUD
-     (time, each bot's motor readout, detection, and any `sh`/push-out event).
+6. **Path diagram (static — no playback loop).** When a saved win is selected, draw its trajectories
+   on the arena instead of the live world:
+   - Set `view='diagram'; shownReplay=r;`. In the `frame()` loop, when `view==='diagram'` call
+     `renderDiagram(shownReplay)` instead of the live `render()` (and skip the physics `step()`).
+   - `renderDiagram(r)`: draw the ring (factor the ring-draw out of `render()` so both reuse it), then
+     for each bot draw a **polyline** through its recorded positions (`frames[].a` / `.b`) in the A/B
+     colour; mark **start** (hollow circle), **end** (filled dot + short heading arrow), a small dot
+     every ~1 s of `t`, and the **side-hit / push-out** points (from `sh` and the final frame). A
+     light caption shows winner + reason. No animation — one static draw.
 
-7. **Condensed step trace** — derive a readable log from `frames` (not one line per tick): emit a line
-   when the **winner's** behaviour label changes or an event fires. Label from motor cmds:
-   `(1,1)=charge`, `l>r=turn right`, `l<r=turn left`, both negative=`reverse`, `~0=idle`; plus
-   detect/lose transitions, `sh` (side hit), and the final push-out (`reason`). Render into a
-   scrollable `#trace` panel. Nice-to-have: clicking a line seeks `player.i` to that frame.
+7. **Movement trace (with magnitudes).** Derive a readable log of the **winner's** moves from
+   `frames` — one line per *move segment*, not per tick:
+   - Classify each frame by motor cmd: both≈equal&>0 `forward`, both≈equal&<0 `reverse`, `l>r`
+     `turn/arc right`, `l<r` `turn/arc left`, ≈0 `idle`. Group consecutive same-class frames into a
+     segment.
+   - For each segment compute, from the poses: net **Δheading** (deg, sign → left/right) and net
+     **distance** (cm), plus its start `t` and duration. Emit e.g. `t=0.30  turn right 41°  (0.25s)`,
+     `t=0.55  forward 18 cm`, or if both are significant `t=0.55  arc right 22°, forward 14 cm`.
+     (Δheading from `theta` deltas — unwrap across ±π; distance from summed `pos` deltas.)
+   - Interleave **event** lines by time: enemy detected/lost, `sh` side hit, first contact, and the
+     final `t=…  push-out → WIN`.
+   - Render into a scrollable `#trace` panel. Nice-to-have: hovering a line highlights that point on
+     the path diagram (store each line's frame index). Add a toggle to show the **loser's** trace too.
 
-8. **Export JSON** — `⤓ Export` downloads the selected recording (local download of the user's own
-   data — fine):
+8. **Export** — `⤓ Export JSON` downloads the selected recording (`frames` + `meta` + the derived
+   trace; local download of the user's own data — fine):
    ```js
    const r=replays[sel];
    const blob=new Blob([JSON.stringify(r)],{type:'application/json'});
    const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
    a.download=`sumo-win-${r.winner}-${r.when}.json`; a.click();
    ```
-   Optional **Import**: read a JSON file and load it as `player` to replay.
+   Nice-to-have: also export the **path diagram as PNG** (`arena.toDataURL('image/png')` while the
+   diagram is shown) and the trace as a `.txt`.
 
 9. **UI** — add a collapsible **"Replays"** card under the Console (left column): a
-   `<select id="replayList">` of saved wins (`"Bot B · round 2 · 0:05 · just now"`), transport
-   controls (`▶/⏸`, a scrub `<input type="range">`, a speed select), `⤓ Export`, and a scrollable
-   `#trace` panel. `refreshReplayList()` repopulates the select. Run/Reset set `mode='live'` and
-   return to the live match (stored frames are independent of live `A`/`B`, so live state is untouched).
+   `<select id="replayList">` of saved wins (`"Bot B · round 2 · 0:05 · just now"`); selecting one
+   sets `view='diagram'`, draws its path on the arena, and fills the scrollable `#trace` panel. Add a
+   `⤓ Export` button and a **"← back to live"** button (sets `view='live'`). `refreshReplayList()`
+   repopulates the select. Run/Reset also set `view='live'` (stored frames are independent of live
+   `A`/`B`, so the live match is untouched).
 
 - **Docs:** add a line to README.md's feature list and the help panel.
 
 **Done when:** play a code-vs-code match (or drive Blue by mouse/keys) to a win → a Replays entry
-appears; ▶ re-plays that round on the arena with working scrub + pause; the step-trace lists the
-winner's key moves with timestamps and the final push-out; ⤓ Export downloads a JSON; and a headless
-`⚔ Run` tournament records nothing (no memory growth).
+appears; selecting it draws both bots' **paths** on the arena and fills the **movement trace** with
+timestamped moves and magnitudes (`turn right 41°`, `forward 18 cm`, …) ending in the push-out;
+⤓ Export downloads a JSON; "back to live" restores the live arena; and a headless `⚔ Run` tournament
+records nothing (no memory growth).
 
 ---
 
