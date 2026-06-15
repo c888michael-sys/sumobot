@@ -443,6 +443,97 @@ records nothing (no memory growth).
 
 ---
 
+## Feature — Split wedge: `wedgeL` / `wedgeR` (asymmetric, per contact point)
+
+Replace the single `wedge` scalar with **two** per-bot heights — `wedgeL` (left edge) and `wedgeR`
+(right edge) — and make the under-ride use the height **at the actual contact point**, not a global
+scalar. This lets a bot be low on one side and higher on the other, so *which part of your wedge
+touches* decides whether you get under. (Build this BEFORE the presets feature, which uses it.)
+*(Line numbers approximate — anchor on the function names.)*
+
+1. **Config fields** — in `applyCfg()` read `wedgeL`/`wedgeR` (clamp 0–1). Keep a derived
+   `this.cfg.wedge = (wedgeL+wedgeR)/2` so existing references (e.g. nose rendering) don't break.
+   **Migration:** if a cfg/save has only old `wedge`, set `wedgeL=wedgeR=wedge`.
+
+2. **Config UI** — replace the single "wedge height 0–1" input (both `data-bot`) with two:
+   `wedge L 0–1` (`data-k="wedgeL"`) and `wedge R 0–1` (`data-k="wedgeR"`), default `0.5`/`0.5`.
+
+3. **Effective height at a contact point** (add near `resolve()`):
+   ```js
+   function wedgeAt(bot, cp){
+     const u = clamp(V.dot(V.sub(cp, bot.pos), bot.right()) / (bot.cfg.wid/2), -1, 1); // -1 left .. +1 right
+     return bot.cfg.wedgeL + (bot.cfg.wedgeR - bot.cfg.wedgeL) * (u + 1) / 2;
+   }
+   ```
+
+4. **Use it in the under-ride** — in `resolve()`, after the contact `c` exists, swap the scalar
+   `A.cfg.wedge`/`B.cfg.wedge` in the wedge block for `wedgeAt(A, c.cp)` / `wedgeAt(B, c.cp)`:
+   ```js
+   const wA = wedgeAt(A, c.cp), wB = wedgeAt(B, c.cp);
+   if (faceA>0.3 && wA < wB) B.tractionMod = Math.min(B.tractionMod, strip(wA, wB));
+   if (faceB>0.3 && wB < wA) A.tractionMod = Math.min(A.tractionMod, strip(wB, wA));
+   ```
+   (`faceA>0.3`/`faceB>0.3` already gate to front engagement. Leave the `SIDEPUSH` block unchanged.)
+
+5. **Rendering** — `drawBot()` shades the nose by `cfg.wedge`; make it reflect the tilt: shade the
+   **lower** side brighter (e.g. a left→right brightness gradient across the nose, or a short bright
+   tick on whichever of L/R is lower). Optional but makes asymmetry visible.
+
+6. **Persistence** — save/load `wedgeL`/`wedgeR` (with the old-`wedge` migration in step 1).
+
+- **Harness:** automatic — the ⚔ tournament already compares whole configs.
+- **Honest caveat (keep in mind, not a bug):** still 2D — this captures "which side gets under," not
+  true 3D ride-up/lift, and there's no wedge-floor drag, so the model still favours "as low as
+  possible on the contact side." Treat results as directional.
+
+**Done when:** give Bot A `wedgeL=0.05`, `wedgeR=0.30` vs a symmetric `0.5/0.5` Bot B; the under-ride
+now depends on where contact lands (A wins when it lands left-side contact, loses when it presents its
+high right side), and the ⚔ harness reflects it.
+
+## Feature — Chassis presets (incl. "Prototype side wedge")
+
+One-click named chassis setups (config + optional bot code + start position), so you can load a whole
+design instead of dialling fields by hand.
+
+1. **Preset data** — an inline `PRESETS` array (kept in `index.html` so it works on `file://` too):
+   ```js
+   const PRESETS = [
+     { name:'Default (symmetric)', cfg:{ mass:1, len:20, wid:20, wedgeL:0.5, wedgeR:0.5, mu:1, maxSpeed:80 } },
+     { name:'Low wedge rammer', cfg:{ mass:1, len:20, wid:20, wedgeL:0.1, wedgeR:0.1, mu:1.1, maxSpeed:80 }, bot:'rammer.js' },
+     { name:'Prototype side wedge', cfg:{ mass:1, len:20, wid:20, wedgeL:0.05, wedgeR:0.30, mu:1.0, maxSpeed:80 },
+       bot:'wedge-lever.js', start:4 },   // low LEFT corner + the wedge-lever maneuver
+   ];
+   ```
+
+2. **UI** — add a per-bot **preset** `<select data-preset="A">` / `data-preset="B"` in each bot's
+   config column (top, near the control/start selects), populated from `PRESETS` (first option:
+   `"preset…"`).
+
+3. **Apply** — on change, `applyPreset(which, p)`:
+   ```js
+   Object.assign(which==='A'?cfgA:cfgB, p.cfg);
+   // reflect into the number inputs for that bot:
+   document.querySelectorAll(`input[data-k][data-bot="${which}"]`).forEach(inp=>{
+     const t = which==='A'?cfgA:cfgB; if (inp.dataset.k in t) inp.value = t[inp.dataset.k];
+   });
+   if (p.start){ if(which==='A')startA=p.start; else startB=p.start;
+     const s=document.querySelector(`select[data-start="${which}"]`); if(s) s.value=p.start; }
+   if (p.bot) loadBotInto(which, p.bot);   // reuses the existing bots/ loader (http only)
+   save();
+   ```
+   Reset the select to the `"preset…"` option afterwards. (Applying just sets already-persisted fields,
+   so no new persistence is needed.)
+
+- **Depends on** the split-wedge feature (the prototype preset uses `wedgeL`/`wedgeR`).
+- **`bot` load** uses `fetch` (works when served over http / on Pages; on `file://` it just sets the
+  config and skips the code — same caveat as the bot loader).
+
+**Done when:** picking **"Prototype side wedge"** for Bot A sets `wedge L≈0.05 / R≈0.30`, loads the
+`wedge-lever` bot, and sets start position 4 in one click; running a match (and a ⚔ tournament vs the
+bot zoo) uses that setup.
+
+---
+
 ## Suggested file layout / deliverables
 
 ```
