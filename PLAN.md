@@ -328,6 +328,107 @@ hijacked).
 
 ---
 
+## Feature — Match recorder: replay + step trace of winning rounds
+
+Auto-record every round; when a bot **wins**, keep that round so you can (a) **re-watch** it on the
+arena with play/pause/scrub, (b) read a **per-step trace** of the winner's decisions, and (c)
+**export it as JSON**. Store actual per-tick frames (poses + motor commands + sensor/decision state)
+so it works for `code`, `mouse`, and `keys` bots — human input isn't reproducible from initial
+conditions, so re-running won't recreate a manual win; recorded frames will.
+*(Line numbers approximate — anchor on the function names.)*
+
+**State** (near the other globals):
+```js
+let recording = true;     // master switch — FORCE false inside runMatches (don't record tournaments)
+let rec = [];             // current round's frames
+let replays = [];         // saved winning rounds (newest first, cap ~10)
+const REC_EVERY = 2;      // record every Nth control tick (~60 Hz) to halve memory; 1 = every tick
+let recTick = 0;
+let mode = 'live';        // 'live' | 'replay'
+let player = null;        // { frames, meta, i, playing, speed }
+const anyEdge = e => e.fl || e.fr || e.bl || e.br;
+```
+
+1. **Capture a frame each running tick** — in `step()`, inside the `state==='running'` path, *after*
+   `al/ar/bl/br` are computed and `sA/sB` exist:
+   ```js
+   if (recording && state==='running' && (recTick++ % REC_EVERY === 0)) {
+     rec.push({
+       t:+t.toFixed(2),
+       a:[+A.pos.x.toFixed(1),+A.pos.y.toFixed(1),+A.theta.toFixed(3)],
+       b:[+B.pos.x.toFixed(1),+B.pos.y.toFixed(1),+B.theta.toFixed(3)],
+       am:[+al.toFixed(2),+ar.toFixed(2)], bm:[+bl.toFixed(2),+br.toFixed(2)],
+       ae: sA.enemy.detected ? [Math.round(sA.enemy.bearing),Math.round(sA.enemy.distance)] : null,
+       be: sB.enemy.detected ? [Math.round(sB.enemy.bearing),Math.round(sB.enemy.distance)] : null,
+       aE:anyEdge(sA.edge), bE:anyEdge(sB.edge),
+       sh:(A._sideHit?'A':0)||(B._sideHit?'B':0)||0   // see step 4 (optional)
+     });
+     if (rec.length>4000) rec.shift();                 // memory backstop for very long rounds
+   }
+   ```
+
+2. **Reset the buffer at round start** — in `setupRound()`: `rec=[]; recTick=0;`
+
+3. **Save on win** — in `endRound(winner,reason)`, when `winner` is `'A'`/`'B'`:
+   ```js
+   if (winner && recording) {
+     replays.unshift({ winner, reason, round, when:Date.now(),
+       meta:{ nameA:A.name, nameB:B.name, ctrlA, ctrlB, startA, startB,
+              cfgA:{...cfgA}, cfgB:{...cfgB}, ring:RING_R },
+       frames: rec.slice() });
+     if (replays.length>10) replays.length=10;
+     logLine('sys',`Recorded win — ${winner==='A'?A.name:B.name} (replay available)`,'sys');
+     refreshReplayList();                              // repopulate the <select> (step 9)
+   }
+   ```
+   (Draws are skipped — the request is "when one bot beats another".)
+
+4. **(Optional) side-hit event** — in `resolve()`, clear `A._sideHit=B._sideHit=false` at the top, and
+   where the front-to-side push fires set the victim's flag (`B._sideHit=true` / `A._sideHit=true`).
+   Lets the trace mark "side hit on the flank". Skip if you'd rather not touch `resolve()`.
+
+5. **Gate OFF in tournaments** — in `runMatches()`, save+set `recording=false` at the start and restore
+   it at the end (otherwise it allocates frames for all N matches).
+
+6. **Playback (no physics — replays stored frames).** Add a replay render path:
+   - Enter: `mode='replay'; player={frames:r.frames, meta:r.meta, i:0, playing:true, speed:1};`
+   - In the `frame()` loop: when `mode==='replay'`, advance `player.i += player.speed` (clamp to
+     `frames.length-1`, stop at end) and call `renderReplay()` instead of the live `render()`.
+   - `renderReplay()`: draw the ring (factor the ring-draw out of `render()` so both reuse it), then
+     two bot polygons at `frames[i].a`/`.b` using `meta.cfgA/cfgB` sizes + the A/B colors, plus a HUD
+     (time, each bot's motor readout, detection, and any `sh`/push-out event).
+
+7. **Condensed step trace** — derive a readable log from `frames` (not one line per tick): emit a line
+   when the **winner's** behaviour label changes or an event fires. Label from motor cmds:
+   `(1,1)=charge`, `l>r=turn right`, `l<r=turn left`, both negative=`reverse`, `~0=idle`; plus
+   detect/lose transitions, `sh` (side hit), and the final push-out (`reason`). Render into a
+   scrollable `#trace` panel. Nice-to-have: clicking a line seeks `player.i` to that frame.
+
+8. **Export JSON** — `⤓ Export` downloads the selected recording (local download of the user's own
+   data — fine):
+   ```js
+   const r=replays[sel];
+   const blob=new Blob([JSON.stringify(r)],{type:'application/json'});
+   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+   a.download=`sumo-win-${r.winner}-${r.when}.json`; a.click();
+   ```
+   Optional **Import**: read a JSON file and load it as `player` to replay.
+
+9. **UI** — add a collapsible **"Replays"** card under the Console (left column): a
+   `<select id="replayList">` of saved wins (`"Bot B · round 2 · 0:05 · just now"`), transport
+   controls (`▶/⏸`, a scrub `<input type="range">`, a speed select), `⤓ Export`, and a scrollable
+   `#trace` panel. `refreshReplayList()` repopulates the select. Run/Reset set `mode='live'` and
+   return to the live match (stored frames are independent of live `A`/`B`, so live state is untouched).
+
+- **Docs:** add a line to README.md's feature list and the help panel.
+
+**Done when:** play a code-vs-code match (or drive Blue by mouse/keys) to a win → a Replays entry
+appears; ▶ re-plays that round on the arena with working scrub + pause; the step-trace lists the
+winner's key moves with timestamps and the final push-out; ⤓ Export downloads a JSON; and a headless
+`⚔ Run` tournament records nothing (no memory growth).
+
+---
+
 ## Suggested file layout / deliverables
 
 ```
