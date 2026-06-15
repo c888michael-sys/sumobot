@@ -41,7 +41,7 @@
   .row{display:flex;gap:10px;flex-wrap:wrap}
   .row > div{flex:1 1 0}
   label.fld{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted)}
-  label.fld input{background:#0a0d11;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:5px 6px;font-size:12px}
+  label.fld input,label.fld select{background:#0a0d11;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:5px 6px;font-size:12px}
   details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:4px}
   .cfgcard{display:flex;gap:14px;flex-wrap:wrap}
   .cfgcol{flex:1 1 240px}
@@ -131,6 +131,16 @@
               <label class="fld">wedge height 0–1<input data-k="wedge" data-bot="A" type="number" step="0.05" value="0.5"></label>
               <label class="fld">max speed cm/s<input data-k="maxSpeed" data-bot="A" type="number" step="5" value="80"></label>
             </div>
+            <div class="row">
+              <label class="fld">start position (Fig. 2)
+                <select data-start="A">
+                  <option value="1">1 · inner, faces out</option>
+                  <option value="2">2 · top, angled in</option>
+                  <option value="3">3 · bottom, angled in</option>
+                  <option value="4" selected>4 · outer, head-on</option>
+                </select>
+              </label>
+            </div>
           </div>
           <div class="cfgcol">
             <h4><span class="dot db" style="display:inline-block"></span> Bot B</h4>
@@ -146,9 +156,19 @@
               <label class="fld">wedge height 0–1<input data-k="wedge" data-bot="B" type="number" step="0.05" value="0.5"></label>
               <label class="fld">max speed cm/s<input data-k="maxSpeed" data-bot="B" type="number" step="5" value="80"></label>
             </div>
+            <div class="row">
+              <label class="fld">start position (Fig. 2)
+                <select data-start="B">
+                  <option value="1">1 · inner, faces out</option>
+                  <option value="2">2 · top, angled in</option>
+                  <option value="3">3 · bottom, angled in</option>
+                  <option value="4" selected>4 · outer, head-on</option>
+                </select>
+              </label>
+            </div>
           </div>
         </div>
-        <div class="small" style="margin-top:6px">Lower <b>wedge height</b> = gets under the opponent and strips their traction. Both bots start identical.</div>
+        <div class="small" style="margin-top:6px">Lower <b>wedge height</b> = gets under the opponent and strips their traction. <b>Start position</b> picks one of the four Figure-2 spots (forward = the heading shown by the arrow).</div>
       </details>
     </div>
 
@@ -163,6 +183,7 @@
           <li><code>time</code> — seconds since the freeze ended (negative during countdown)</li>
           <li><code>frozen</code> — true during the 5&nbsp;s countdown</li>
           <li><code>memory</code> — a <code>{}</code> that persists across ticks (your robot's RAM)</li>
+          <li><code>start</code> — your chosen start position <code>1–4</code> (Figure 2), in case your code wants to branch on it</li>
           <li><code>log(...)</code> — print to the console panel</li>
         </ul>
         <p class="small">Win a round by pushing the opponent's center past the ring edge, or if it stalls (stops &gt;5&nbsp;s). Best of 3.
@@ -346,7 +367,7 @@ function senseFor(self,other){
 /* ---------- compile user code ---------- */
 function compile(code){
   try{
-    const fn=new Function('enemy','sensors','edge','time','frozen','memory','setMotors','log',
+    const fn=new Function('enemy','sensors','edge','time','frozen','memory','setMotors','log','start',
       '"use strict";\n'+code);
     return {fn,err:null};
   }catch(e){return {fn:null,err:e.message};}
@@ -367,18 +388,24 @@ let state='idle';        // idle | countdown | running | roundover | matchover
 let round=1, scoreA=0, scoreB=0, t=0, roundResultTimer=0, banner='';
 let logThrottle={};
 
+/* start positions (Figure 2): 4 spots per side, mirrored across the centre line.
+   th = heading (forward), where 0=+x (toward opponent for A), PI=-x. */
+const START_A={
+  1:{x:-12,y:  0,th:Math.PI},     // inner, by centre line, faces outward (←)
+  2:{x:-22,y:-22,th:Math.PI/4},   // top, angled into the centre (↘)
+  3:{x:-22,y: 22,th:-Math.PI/4},  // bottom, angled into the centre (↗)
+  4:{x:-30,y:  0,th:0},           // outer, head-on toward opponent (→)
+};
+const mirrorPos=p=>({x:-p.x,y:p.y,th:Math.PI-p.th});
+const START_B={1:mirrorPos(START_A[1]),2:mirrorPos(START_A[2]),3:mirrorPos(START_A[3]),4:mirrorPos(START_A[4])};
+let startA=4, startB=4;
+
 function setupRound(){
-  const swap=(round%2===0); // alternate sides each round
-  const x=20;
-  if(!swap){ A.place(-x,0,0); B.place(x,0,Math.PI); }
-  else     { A.place(x,0,Math.PI); B.place(-x,0,0); }
   A.applyCfg(cfgA); B.applyCfg(cfgB);
-  A.place(A.pos.x,A.pos.y,A.theta); B.place(B.pos.x,B.pos.y,B.theta); // re-init dynamics after cfg
-  // re-place after applyCfg reset
-  if(!swap){ A.pos={x:-x,y:0};A.theta=0; B.pos={x:x,y:0};B.theta=Math.PI; }
-  else     { A.pos={x:x,y:0};A.theta=Math.PI; B.pos={x:-x,y:0};B.theta=0; }
+  const pa=START_A[startA]||START_A[4], pb=START_B[startB]||START_B[4];
+  A.place(pa.x,pa.y,pa.th); A.startPos=startA;
+  B.place(pb.x,pb.y,pb.th); B.startPos=startB;
   t=-FREEZE; state='countdown'; banner=''; roundResultTimer=0;
-  A.stall=0;B.stall=0;
 }
 
 function startMatch(){
@@ -398,7 +425,7 @@ function runBrain(bot,brain,sense,frozen){
   const log=(...m)=>{const key=tag+m.join(' ');if(logThrottle[key]&&performance.now()-logThrottle[key]<400)return;
     logThrottle[key]=performance.now();logLine(tag,m.join(' '),tag==='A'?'ca':'cb');};
   try{
-    brain.fn(sense.enemy,sense.sensors,sense.edge,+t.toFixed(2),frozen,bot.memory,setMotors,log);
+    brain.fn(sense.enemy,sense.sensors,sense.edge,+t.toFixed(2),frozen,bot.memory,setMotors,log,bot.startPos);
   }catch(e){ if(!bot.err){bot.err=e.message;logLine(tag,'runtime error: '+e.message,'cb');} }
   if(frozen) return [0,0];
   return [l,r];
@@ -492,6 +519,22 @@ function drawRays(bot,other){
   for(const p of cs){const px=toPx(p);const hot=V.len(p)>RING_R-BORDER;
     ctx.beginPath();ctx.arc(px.x,px.y,3,0,7);ctx.fillStyle=hot?'#fbbf24':'rgba(255,255,255,.35)';ctx.fill();}
 }
+function drawStartMarkers(){
+  const sets=[[START_A,startA,'#3b82f6'],[START_B,startB,'#ef4444']];
+  ctx.textAlign='center';ctx.font='10px system-ui';
+  for(const [set,chosen,col] of sets){
+    for(let i=1;i<=4;i++){
+      const p=set[i], c=toPx({x:p.x,y:p.y}), sel=(i===chosen);
+      const e=toPx({x:p.x+Math.cos(p.th)*9,y:p.y+Math.sin(p.th)*9});
+      ctx.globalAlpha=sel?0.95:0.3;
+      ctx.strokeStyle=col;ctx.lineWidth=sel?3:1.5;
+      ctx.beginPath();ctx.moveTo(c.x,c.y);ctx.lineTo(e.x,e.y);ctx.stroke();
+      ctx.fillStyle=col;ctx.beginPath();ctx.arc(c.x,c.y,sel?4:2.5,0,7);ctx.fill();
+      ctx.fillStyle=sel?'#fff':'rgba(255,255,255,.5)';ctx.fillText(i,c.x,c.y-9);
+      ctx.globalAlpha=1;
+    }
+  }
+}
 function render(){
   ctx.clearRect(0,0,W,H);
   // ring
@@ -502,6 +545,7 @@ function render(){
   // center mark
   ctx.strokeStyle='#222b34';ctx.lineWidth=1;
   ctx.beginPath();ctx.moveTo(ctr.x-8,ctr.y);ctx.lineTo(ctr.x+8,ctr.y);ctx.moveTo(ctr.x,ctr.y-8);ctx.lineTo(ctr.x,ctr.y+8);ctx.stroke();
+  if(state==='countdown'||state==='idle') drawStartMarkers();
   if(document.getElementById('showRays').checked){drawRays(A,B);drawRays(B,A);}
   drawBot(A);drawBot(B);
   // countdown number
@@ -554,16 +598,24 @@ codeA.oninput=save; codeB.oninput=save;
 document.querySelectorAll('input[data-k]').forEach(inp=>{
   inp.oninput=()=>{const tgt=inp.dataset.bot==='A'?cfgA:cfgB;tgt[inp.dataset.k]=+inp.value;save();};
 });
+document.querySelectorAll('select[data-start]').forEach(sel=>{
+  sel.onchange=()=>{ if(sel.dataset.start==='A')startA=+sel.value; else startB=+sel.value;
+    if(state==='idle'){setupRound();state='idle';}  // live-preview the new spot while idle
+    save(); };
+});
 
 /* ---------- persistence ---------- */
 function save(){
-  try{localStorage.setItem('sumo',JSON.stringify({a:codeA.value,b:codeB.value,cfgA,cfgB}));}catch(e){}
+  try{localStorage.setItem('sumo',JSON.stringify({a:codeA.value,b:codeB.value,cfgA,cfgB,startA,startB}));}catch(e){}
 }
 function load(){
   try{
     const s=JSON.parse(localStorage.getItem('sumo')||'null');
     if(s){codeA.value=s.a;codeB.value=s.b;Object.assign(cfgA,s.cfgA);Object.assign(cfgB,s.cfgB);
+      if(s.startA)startA=s.startA; if(s.startB)startB=s.startB;
       document.querySelectorAll('input[data-k]').forEach(inp=>{const t=inp.dataset.bot==='A'?cfgA:cfgB;inp.value=t[inp.dataset.k];});
+      const selA=document.querySelector('select[data-start="A"]');if(selA)selA.value=startA;
+      const selB=document.querySelector('select[data-start="B"]');if(selB)selB.value=startB;
       return true;}
   }catch(e){}
   return false;

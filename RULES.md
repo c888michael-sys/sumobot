@@ -28,7 +28,8 @@ Two robots compete head-to-head; **force your opponent out of the ring**. Fully 
 - **"Forward" is whatever direction the main ultrasonic sensor / wedge ramp faces** (i.e. the forward
   defined in your code). The Figure 2 arrow marks this heading.
 - *Strategic note:* choosing your start position/orientation relative to the opponent is a real lever
-  (e.g. start angled to go for a flank). **The simulator does not model this yet** — see PLAN.md.
+  (e.g. start angled to go for a flank). **The simulator now models this** — pick one of the four
+  spots per bot; the chosen position + heading are exposed to the bot code as `start`.
 
 ## Robot specs
 | | Standard | Open |

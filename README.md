@@ -26,7 +26,8 @@ Edit the **Bot A** and **Bot B** code boxes, press **Run match**, watch the best
   opponent's traction (their wheels "lift"). Lets you test **low-wedge vs high-wedge**.
 - **Faithful to the rulebook:** 120 cm ring + 2.5 cm white border, 5 s start freeze, best-of-3,
   120 s rounds, win by pushing the opponent's centre past the edge **or** if it stalls > 5 s.
-  Sides alternate each round. (See [RULES.md](RULES.md).)
+- **Four selectable start positions per bot** (the Figure 2 spots — pick position + heading before
+  the round; shown as faint numbered markers in the arena). (See [RULES.md](RULES.md).)
 - **Realistic sensing:** IR distance rays, a fused enemy bearing/distance reading, and four
   corner line-sensors for edge detection.
 - Editable chassis params per bot (mass, grip µ, size, wedge height, max speed). Code + config
@@ -61,6 +62,7 @@ setMotors(0.6, -0.6);
 | `time` | seconds since the freeze ended (negative during the 5 s countdown) |
 | `frozen` | `true` during the 5 s countdown (motors ignored, but sensors are live) |
 | `memory` | a `{}` that persists across ticks — your robot's RAM |
+| `start` | your chosen start position `1–4` (Figure 2), so code can branch on where it began |
 | `setMotors(l, r)` | drive: each `-1…1` |
 | `log(...)` | print to the console panel |
 

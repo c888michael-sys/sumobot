@@ -97,11 +97,10 @@ and report win %, average margin, and self-out rate. Two options:
 - Add **configurable sensor layouts** (number/angles of IR sensors; ultrasonic vs IR range) to
   match what the team actually mounts.
 - Add **randomised start positions/headings** to test robustness.
-- **Model the 4 starting positions (§3.3 / Figure 2).** The real rules let each team pick one of four
-  start positions/orientations before each round (forward = where the main sensor/wedge faces). Add a
-  per-bot start-position choice (config or a `chooseStart()` hook returning 0–3) and place bots on
-  opposing sides accordingly. **Needs the Figure 2 geometry** — not in the text export; get the image
-  from the team before implementing.
+- ~~**Model the 4 starting positions (§3.3 / Figure 2).**~~ ✅ **DONE.** Each bot picks one of the four
+  Figure-2 spots (position + heading) via a dropdown; the choice is exposed to bot code as `start`
+  (1–4) and drawn as faint numbered markers. Geometry lives in `START_A`/`START_B` in `index.html`.
+  Headings: pos 1 inner/faces-out, 2 top/angled-in, 3 bottom/angled-in, 4 outer/head-on (mirrored for B).
 
 ## Phase 5 — Hardware firmware port
 
