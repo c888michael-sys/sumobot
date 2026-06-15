@@ -96,6 +96,20 @@
       <h3 style="margin:0 0 6px;font-size:13px">Console</h3>
       <div id="console"></div>
     </div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <h3 style="margin:0;font-size:13px">Replays</h3>
+        <div style="display:flex;gap:6px">
+          <button id="exportReplay" disabled style="font-size:12px;padding:4px 8px">⤓ Export</button>
+          <button id="backLive" style="font-size:12px;padding:4px 8px">← live</button>
+        </div>
+      </div>
+      <select id="replayList" style="width:100%;background:#0a0d11;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:5px 6px;font-size:12px;margin-bottom:8px">
+        <option value="">— no replays yet —</option>
+      </select>
+      <div id="trace" style="height:160px;overflow:auto;background:#0a0d11;border:1px solid var(--line);border-radius:8px;padding:8px;font-family:var(--mono);font-size:11px;color:#b9c8d6;white-space:pre-wrap"></div>
+    </div>
   </div>
 
   <!-- RIGHT: code + config + help -->
@@ -493,12 +507,23 @@ let JITTER=0;                      // start-heading jitter (rad) — set during 
 let SIDEPUSH=0.25;                 // grip a flank-hit bot keeps (1 = side-push off, lower = more lethal)
 const MAX_ROUNDS=7;               // safety cap so endless draws can't loop forever
 
+/* ---------- match recorder ---------- */
+let recording=true;   // master switch — forced false inside runMatches()
+let rec=[];           // current round's frames (cleared on round start)
+let replays=[];       // saved winning rounds, newest first, capped at 10
+const REC_EVERY=2;   // record every Nth tick → ~60 Hz at 120 Hz engine
+let recTick=0;
+let view='live';      // 'live' | 'diagram'
+let shownReplay=null;
+const anyEdge=e=>e.fl||e.fr||e.bl||e.br;
+
 function setupRound(){
   A.applyCfg(cfgA); B.applyCfg(cfgB);
   const pa=START_A[startA]||START_A[4], pb=START_B[startB]||START_B[4];
   A.place(pa.x,pa.y,pa.th); A.startPos=startA;
   B.place(pb.x,pb.y,pb.th); B.startPos=startB;
   if(JITTER>0){ A.theta+=(Math.random()-0.5)*JITTER; B.theta+=(Math.random()-0.5)*JITTER; }
+  rec=[]; recTick=0;
   for(const k in keys) keys[k]=false;
   t=-FREEZE; state='countdown'; banner=''; roundResultTimer=0;
 }
@@ -518,6 +543,7 @@ function startMatch(){
    We randomise each bot's start position (1-4) and jitter the start heading. Bots are forced to
    'code' control (a mouse bot can't play headless). State is saved and restored afterwards. */
 function runMatches(n){
+  const savedRec=recording; recording=false;
   const saved={running, startA, startB, ctrlA, ctrlB, JITTER};
   running=false; ctrlA='code'; ctrlB='code'; JITTER=0.5;
   // Bot X = whatever's in slot A, bot Y = slot B. We ALTERNATE sides each match so any
@@ -540,6 +566,7 @@ function runMatches(n){
   running=saved.running; startA=saved.startA; startB=saved.startB;
   ctrlA=saved.ctrlA; ctrlB=saved.ctrlB; JITTER=saved.JITTER;
   scoreA=0;scoreB=0;round=1; setupRound(); state='idle';
+  recording=savedRec;
   return {n, a:x, b:y, draws, winA:(100*x/n).toFixed(1)+'%', winB:(100*y/n).toFixed(1)+'%',
           draw:(100*draws/n).toFixed(1)+'%', ms};
 }
@@ -585,6 +612,15 @@ function runBrain(bot,brain,sense,frozen){
 
 function endRound(winner,reason){
   if(winner==='A'){scoreA++;} else if(winner==='B'){scoreB++;}
+  if(winner && recording){
+    replays.unshift({winner,reason,round,when:Date.now(),
+      meta:{nameA:A.name,nameB:B.name,ctrlA,ctrlB,startA,startB,
+            cfgA:{...cfgA},cfgB:{...cfgB},ring:RING_R},
+      frames:rec.slice()});
+    if(replays.length>10) replays.length=10;
+    logLine('sys',`Recorded win — ${winner==='A'?A.name:B.name} (replay available)`,'sys');
+    refreshReplayList();
+  }
   banner = winner? (winner==='A'?A.name:B.name)+' wins round' : 'Draw';
   logLine('sys',`Round ${round}: ${winner?(winner==='A'?'A':'B')+' wins':'draw'} (${reason})`,'sys');
   state='roundover'; roundResultTimer=1.4;
@@ -627,7 +663,23 @@ function step(){
       A.pos=V.add(A.pos,V.mul(A.vel,dt));A.theta+=A.omega*dt;
       B.pos=V.add(B.pos,V.mul(B.vel,dt));B.theta+=B.omega*dt;
     }
-    if(state==='running'){ t+=DT; checkRound(); }
+    if(state==='running'){
+      t+=DT;
+      if(recording && (recTick++ % REC_EVERY === 0)){
+        rec.push({
+          t:+t.toFixed(2),
+          a:[+A.pos.x.toFixed(1),+A.pos.y.toFixed(1),+A.theta.toFixed(3)],
+          b:[+B.pos.x.toFixed(1),+B.pos.y.toFixed(1),+B.theta.toFixed(3)],
+          am:[+al.toFixed(2),+ar.toFixed(2)],bm:[+bl.toFixed(2),+br.toFixed(2)],
+          ae:sA.enemy.detected?[Math.round(sA.enemy.bearing),Math.round(sA.enemy.distance)]:null,
+          be:sB.enemy.detected?[Math.round(sB.enemy.bearing),Math.round(sB.enemy.distance)]:null,
+          aE:anyEdge(sA.edge),bE:anyEdge(sB.edge),
+          sh:0
+        });
+        if(rec.length>4000) rec.shift();
+      }
+      checkRound();
+    }
   } else if(state==='roundover'){
     roundResultTimer-=DT;
     if(roundResultTimer<=0){
@@ -649,6 +701,16 @@ function step(){
 }
 
 /* ---------- render ---------- */
+function drawRing(){
+  ctx.clearRect(0,0,W,H);
+  const ctr=toPx({x:0,y:0});
+  ctx.beginPath();ctx.arc(ctr.x,ctr.y,RING_R*SCALE,0,7);ctx.fillStyle='#15191e';ctx.fill();
+  ctx.lineWidth=BORDER*SCALE;ctx.strokeStyle='#e8eef5';ctx.stroke();
+  ctx.beginPath();ctx.arc(ctr.x,ctr.y,(RING_R-BORDER)*SCALE,0,7);ctx.fillStyle='#0c0f13';ctx.fill();
+  ctx.strokeStyle='#222b34';ctx.lineWidth=1;
+  const c2=toPx({x:0,y:0});
+  ctx.beginPath();ctx.moveTo(c2.x-8,c2.y);ctx.lineTo(c2.x+8,c2.y);ctx.moveTo(c2.x,c2.y-8);ctx.lineTo(c2.x,c2.y+8);ctx.stroke();
+}
 function drawBot(bot){
   const c=bot.corners().map(toPx);
   ctx.beginPath();ctx.moveTo(c[0].x,c[0].y);for(let i=1;i<4;i++)ctx.lineTo(c[i].x,c[i].y);ctx.closePath();
@@ -706,15 +768,7 @@ function drawTarget(bot,ctrl){
   ctx.globalAlpha=1;
 }
 function render(){
-  ctx.clearRect(0,0,W,H);
-  // ring
-  const ctr=toPx({x:0,y:0});
-  ctx.beginPath();ctx.arc(ctr.x,ctr.y,RING_R*SCALE,0,7);ctx.fillStyle='#15191e';ctx.fill();
-  ctx.lineWidth=BORDER*SCALE;ctx.strokeStyle='#e8eef5';ctx.stroke();
-  ctx.beginPath();ctx.arc(ctr.x,ctr.y,(RING_R-BORDER)*SCALE,0,7);ctx.fillStyle='#0c0f13';ctx.fill();
-  // center mark
-  ctx.strokeStyle='#222b34';ctx.lineWidth=1;
-  ctx.beginPath();ctx.moveTo(ctr.x-8,ctr.y);ctx.lineTo(ctr.x+8,ctr.y);ctx.moveTo(ctr.x,ctr.y-8);ctx.lineTo(ctr.x,ctr.y+8);ctx.stroke();
+  drawRing();
   if(state==='countdown'||state==='idle') drawStartMarkers();
   if(document.getElementById('showRays').checked){drawRays(A,B);drawRays(B,A);}
   drawTarget(A,ctrlA);drawTarget(B,ctrlB);
@@ -732,15 +786,163 @@ function render(){
   document.getElementById('status').textContent=`Round ${round} · ${phase}`;
 }
 
+/* ---------- replay diagram & trace ---------- */
+function renderDiagram(r){
+  drawRing();
+  if(!r||!r.frames.length) return;
+  const frames=r.frames;
+  const dotsEvery=Math.max(1,Math.round(60/REC_EVERY)); // dot every ~1 s
+
+  function drawPath(key,col){
+    // polyline
+    ctx.beginPath();
+    const p0=toPx({x:frames[0][key][0],y:frames[0][key][1]});
+    ctx.moveTo(p0.x,p0.y);
+    for(let i=1;i<frames.length;i++){
+      const p=toPx({x:frames[i][key][0],y:frames[i][key][1]});
+      ctx.lineTo(p.x,p.y);
+    }
+    ctx.strokeStyle=col;ctx.lineWidth=2;ctx.globalAlpha=0.7;ctx.stroke();ctx.globalAlpha=1;
+    // 1-second dots
+    for(let i=0;i<frames.length;i+=dotsEvery){
+      const p=toPx({x:frames[i][key][0],y:frames[i][key][1]});
+      ctx.beginPath();ctx.arc(p.x,p.y,3,0,7);
+      ctx.fillStyle=col;ctx.globalAlpha=0.6;ctx.fill();ctx.globalAlpha=1;
+    }
+    // start: hollow circle
+    const ps=toPx({x:frames[0][key][0],y:frames[0][key][1]});
+    ctx.beginPath();ctx.arc(ps.x,ps.y,6,0,7);
+    ctx.strokeStyle=col;ctx.lineWidth=2;ctx.stroke();
+    // end: filled dot + heading arrow
+    const last=frames[frames.length-1];
+    const pe=toPx({x:last[key][0],y:last[key][1]});
+    const th=last[key][2];
+    ctx.beginPath();ctx.arc(pe.x,pe.y,5,0,7);ctx.fillStyle=col;ctx.fill();
+    ctx.beginPath();ctx.moveTo(pe.x,pe.y);
+    ctx.lineTo(pe.x+Math.cos(th)*15,pe.y+Math.sin(th)*15);
+    ctx.strokeStyle=col;ctx.lineWidth=2;ctx.stroke();
+  }
+
+  drawPath('a','#3b82f6');
+  drawPath('b','#ef4444');
+
+  // caption
+  const winName=r.winner==='A'?r.meta.nameA:r.meta.nameB;
+  ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(0,0,W,26);
+  ctx.fillStyle='#e6edf3';ctx.font='bold 13px system-ui';ctx.textAlign='center';
+  ctx.fillText(`${winName} wins · R${r.round} · ${r.reason}`,W/2,17);
+  ctx.textAlign='left';
+}
+
+function buildTrace(r){
+  const frames=r.frames;
+  if(!frames.length) return '— no frames recorded —';
+  const wKey=r.winner==='A'?'a':'b';
+  const mKey=r.winner==='A'?'am':'bm';
+  const eKey=r.winner==='A'?'ae':'be';
+
+  function dAngle(a,b){let d=b-a;while(d>Math.PI)d-=2*Math.PI;while(d<-Math.PI)d+=2*Math.PI;return d;}
+
+  function classify(m){
+    const [l,rt]=m, avg=(l+rt)/2, diff=l-rt;
+    if(Math.abs(l)<0.08&&Math.abs(rt)<0.08) return 'idle';
+    if(Math.abs(diff)<0.2) return avg>0?'forward':'reverse';
+    return diff>0?'turn right':'turn left';
+  }
+
+  // Build segments
+  const segs=[];
+  let segStart=0, curClass=classify(frames[0][mKey]);
+  for(let i=1;i<frames.length;i++){
+    const c=classify(frames[i][mKey]);
+    if(c!==curClass){segs.push({cls:curClass,from:segStart,to:i-1});segStart=i;curClass=c;}
+  }
+  segs.push({cls:curClass,from:segStart,to:frames.length-1});
+
+  // Build events list
+  const events=[];
+  let wasDetected=false;
+  for(let i=0;i<frames.length;i++){
+    const f=frames[i], det=f[eKey]!=null;
+    if(det&&!wasDetected) events.push({t:f.t,type:'detect'});
+    if(!det&&wasDetected) events.push({t:f.t,type:'lost'});
+    wasDetected=det;
+  }
+  events.push({t:frames[frames.length-1].t,type:'pushout'});
+  let evIdx=0;
+
+  const lines=[];
+  for(const seg of segs){
+    // flush events before this segment ends
+    const segEndT=frames[seg.to].t;
+    while(evIdx<events.length&&events[evIdx].type!=='pushout'&&events[evIdx].t<=segEndT){
+      const ev=events[evIdx++];
+      if(ev.type==='detect') lines.push(`t=${ev.t.toFixed(2)}  ⬡ enemy detected`);
+      else if(ev.type==='lost') lines.push(`t=${ev.t.toFixed(2)}  · enemy lost`);
+    }
+
+    if(seg.cls==='idle'&&seg.to-seg.from<4) continue; // skip micro-idles
+
+    // Cumulative heading change (sum frame-by-frame to handle wrapping)
+    let totalHeadDeg=0, totalDist=0;
+    for(let i=seg.from+1;i<=seg.to;i++){
+      totalHeadDeg+=dAngle(frames[i-1][wKey][2],frames[i][wKey][2])*DEG;
+      const dx=frames[i][wKey][0]-frames[i-1][wKey][0];
+      const dy=frames[i][wKey][1]-frames[i-1][wKey][1];
+      totalDist+=Math.hypot(dx,dy);
+    }
+    const dur=(frames[seg.to].t-frames[seg.from].t).toFixed(2);
+
+    let desc;
+    if(seg.cls==='idle'){
+      desc=`idle (${dur}s)`;
+    } else if(seg.cls==='forward'||seg.cls==='reverse'){
+      desc=`${seg.cls} ${totalDist.toFixed(0)} cm`;
+      if(Math.abs(totalHeadDeg)>5) desc+=`, arc ${totalHeadDeg>0?'right':'left'} ${Math.abs(totalHeadDeg).toFixed(0)}°`;
+      desc+=`  (${dur}s)`;
+    } else {
+      desc=`${seg.cls} ${Math.abs(totalHeadDeg).toFixed(0)}°`;
+      if(totalDist>3) desc+=`, forward ${totalDist.toFixed(0)} cm`;
+      desc+=`  (${dur}s)`;
+    }
+    lines.push(`t=${frames[seg.from].t.toFixed(2)}  ${desc}`);
+  }
+
+  const po=events.find(e=>e.type==='pushout');
+  if(po) lines.push(`t=${po.t.toFixed(2)}  🏆 ${r.reason} → WIN`);
+  return lines.join('\n');
+}
+
+function refreshReplayList(){
+  const sel=document.getElementById('replayList');
+  if(!sel) return;
+  sel.innerHTML='';
+  if(!replays.length){
+    sel.innerHTML='<option value="">— no replays yet —</option>';
+    return;
+  }
+  replays.forEach((r,i)=>{
+    const o=document.createElement('option');
+    const ago=new Date(r.when).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+    const winName=r.winner==='A'?r.meta.nameA:r.meta.nameB;
+    o.value=i; o.textContent=`${winName} · R${r.round} · ${r.reason} · ${ago}`;
+    sel.appendChild(o);
+  });
+}
+
 /* ---------- main loop ---------- */
 let running=false, acc=0, last=performance.now(), speed=1;
 function frame(now){
   const real=Math.min((now-last)/1000,0.1); last=now;
-  if(running && state!=='idle' && state!=='matchover'){
-    acc+=real*speed;
-    while(acc>=DT){ step(); acc-=DT; }
+  if(view==='diagram'){
+    if(shownReplay) renderDiagram(shownReplay);
+  } else {
+    if(running && state!=='idle' && state!=='matchover'){
+      acc+=real*speed;
+      while(acc>=DT){ step(); acc-=DT; }
+    }
+    render();
   }
-  render();
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -758,7 +960,7 @@ function logLine(who,msg,cls){
 
 /* ---------- UI wiring ---------- */
 const codeA=document.getElementById('codeA'), codeB=document.getElementById('codeB');
-document.getElementById('run').onclick=()=>{running=true;if(state==='idle'||state==='matchover')startMatch();};
+document.getElementById('run').onclick=()=>{view='live';running=true;if(state==='idle'||state==='matchover')startMatch();};
 document.getElementById('pause').onclick=()=>{running=false;};
 document.getElementById('runN').onclick=()=>{
   if(ctrlA!=='code'||ctrlB!=='code') logLine('sys','(manual/keyboard bots play as code in headless runs)','sys');
@@ -768,7 +970,7 @@ document.getElementById('runN').onclick=()=>{
   logLine('sys',`Result of ${r.n}: ${A.name} ${r.winA} · ${B.name} ${r.winB} · draws ${r.draw}  (${r.ms} ms)`,'sys');
   banner=`${A.name} ${r.winA} / ${B.name} ${r.winB}`;
 };
-document.getElementById('reset').onclick=()=>{running=false;state='idle';scoreA=scoreB=0;round=1;banner='';setupRound();state='idle';};
+document.getElementById('reset').onclick=()=>{view='live';running=false;state='idle';scoreA=scoreB=0;round=1;banner='';setupRound();state='idle';};
 document.getElementById('apply').onclick=()=>{save();running=true;startMatch();};
 document.getElementById('copyB').onclick=()=>{codeB.value=codeA.value;save();};
 document.getElementById('reseed').onclick=()=>{codeA.value=DEFAULT_BOT;codeB.value=DEFAULT_BOT;save();};
@@ -857,6 +1059,27 @@ function canvasTarget(ev){
   if(ctrlA==='mouse') A.target={x:t.x,y:t.y};
   if(ctrlB==='mouse') B.target={x:t.x,y:t.y};
 }
+// ---- replay controls ----
+document.getElementById('replayList').onchange=e=>{
+  const idx=+e.target.value;
+  if(isNaN(idx)||!replays[idx]) return;
+  shownReplay=replays[idx]; view='diagram'; running=false;
+  document.getElementById('trace').textContent=buildTrace(shownReplay);
+  document.getElementById('exportReplay').disabled=false;
+};
+document.getElementById('backLive').onclick=()=>{
+  view='live'; shownReplay=null;
+  document.getElementById('exportReplay').disabled=true;
+  document.getElementById('replayList').value='';
+};
+document.getElementById('exportReplay').onclick=()=>{
+  if(!shownReplay) return;
+  const blob=new Blob([JSON.stringify(shownReplay)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`sumo-win-${shownReplay.winner}-${shownReplay.when}.json`;
+  a.click();
+};
 cv.addEventListener('pointerdown',e=>{ if(ctrlA==='mouse'||ctrlB==='mouse'){dragging=true;canvasTarget(e);} });
 cv.addEventListener('pointermove',e=>{ if(dragging)canvasTarget(e); });
 window.addEventListener('pointerup',()=>{dragging=false;});
