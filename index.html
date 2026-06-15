@@ -462,6 +462,13 @@ function resolve(A,B){
   const strip=(lowH,hiH)=>clamp(1-K*(hiH-lowH),0.12,1);
   if(liftB>0){ B.tractionMod=Math.min(B.tractionMod,strip(wA,wB)); B.vel=V.mul(B.vel,1-0.2*liftB); fxLog('uB','▲ A is under B → B weakened (grip '+B.tractionMod.toFixed(2)+', slowed)'); }
   if(liftA>0){ A.tractionMod=Math.min(A.tractionMod,strip(wB,wA)); A.vel=V.mul(A.vel,1-0.2*liftA); fxLog('uA','▲ B is under A → A weakened (grip '+A.tractionMod.toFixed(2)+', slowed)'); }
+  // ---- wedge lever: off-centre forward push at cp → torque that rotates the lifted bot ----
+  // TURN scales the per-tick impulse; ra/rb are cp offsets already computed above.
+  // Asymmetric (one-side-low) wedge shifts cp off the opponent's centreline → large cross(r,J) → visible spin.
+  // Symmetric head-on → cp near centreline → near-zero cross product → no unnatural spin.
+  const TURN=0.005;
+  if(liftB>0){ const drv=Math.max(0,V.dot(A.vel,A.fwd())); const J=V.mul(A.fwd(),TURN*liftB*drv*B.mass); applyImpulse(B,J,rb); fxLog('turnB','↻ A levers B around (turning)'); }
+  if(liftA>0){ const drv=Math.max(0,V.dot(B.vel,B.fwd())); const J=V.mul(B.fwd(),TURN*liftA*drv*A.mass); applyImpulse(A,J,ra); fxLog('turnA','↻ B levers A around (turning)'); }
   // ---- front-to-side: nose on flank → T-boned bot loses grip ----
   const SIDE=SIDEPUSH;
   if(faceA>0.55 && Math.abs(faceB)<0.5){ B.tractionMod=Math.min(B.tractionMod,SIDE); fxLog('sB','◄ B caught on the flank by A → grip '+B.tractionMod.toFixed(2)); }
